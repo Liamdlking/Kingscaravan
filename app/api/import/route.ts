@@ -12,11 +12,11 @@ type ImportRow = {
   guest_name?: string;
   guest_email?: string;
   phone?: string;
-  guests_count?: number | "";
-  children_count?: number | "";
-  dogs_count?: number | "";
+  guests_count?: any;
+  children_count?: any;
+  dogs_count?: any;
   vehicle_reg?: string;
-  price?: number | "";
+  price?: any;
   special_requests?: string;
 };
 
@@ -24,10 +24,37 @@ function isOwner() {
   return cookies().get("owner")?.value === "1";
 }
 
+// Removes invisible unicode chars that iOS/Safari often injects
+function cleanStr(v: any) {
+  if (v == null) return "";
+  return String(v)
+    .replace(/[\u200B-\u200D\uFEFF]/g, "") // zero-width chars
+    .replace(/\u00A0/g, " ") // NBSP
+    .replace(/[^\S\r\n]+/g, " ") // collapse weird spaces (keep newlines)
+    .trim();
+}
+
+// Keep only digits and '-' for dates
+function cleanDate(v: any) {
+  const s = cleanStr(v);
+  // remove anything except digits and hyphen
+  const t = s.replace(/[^\d-]/g, "");
+  // must match YYYY-MM-DD
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return "";
+  return t;
+}
+
+function toNumOrNull(v: any) {
+  const s = cleanStr(v);
+  if (!s) return null;
+  // remove commas and currency symbols
+  const t = s.replace(/[,£$]/g, "");
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
 export async function POST(req: Request) {
-  if (!isOwner()) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!isOwner()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const supabase = supabaseServer();
   const body = await req.json().catch(() => ({}));
@@ -35,11 +62,8 @@ export async function POST(req: Request) {
   const mode: "skip" | "strict" = body.mode === "strict" ? "strict" : "skip";
   const rows: ImportRow[] = Array.isArray(body.rows) ? body.rows : [];
 
-  if (!rows.length) {
-    return NextResponse.json({ error: "No rows provided" }, { status: 400 });
-  }
+  if (!rows.length) return NextResponse.json({ error: "No rows provided" }, { status: 400 });
 
-  // Existing confirmed bookings (only these block overlaps)
   const { data: existing, error: readErr } = await supabase
     .from("bookings")
     .select("id,start_date,end_date")
@@ -51,25 +75,27 @@ export async function POST(req: Request) {
   let imported = 0;
   let skipped = 0;
   const errors: string[] = [];
-
   const inserts: any[] = [];
 
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
 
-    const start_date = String(r.start_date || "");
-    const end_date = String(r.end_date || "");
-    const status: Status = r.status === "provisional" ? "provisional" : "confirmed";
+    const start_date = cleanDate(r.start_date);
+    const end_date = cleanDate(r.end_date);
+    const status: Status = cleanStr(r.status) === "provisional" ? "provisional" : "confirmed";
 
     if (!start_date || !end_date) {
-      const msg = `Row ${i + 1}: start_date and end_date are required`;
+      const msg = `Row ${i + 1}: invalid date(s). start_date="${cleanStr(r.start_date)}" end_date="${cleanStr(
+        r.end_date
+      )}"`;
       if (mode === "strict") return NextResponse.json({ error: msg }, { status: 400 });
       errors.push(msg);
       skipped++;
       continue;
     }
+
     if (end_date <= start_date) {
-      const msg = `Row ${i + 1}: end_date must be after start_date`;
+      const msg = `Row ${i + 1}: end_date must be after start_date (${start_date} → ${end_date})`;
       if (mode === "strict") return NextResponse.json({ error: msg }, { status: 400 });
       errors.push(msg);
       skipped++;
@@ -93,19 +119,18 @@ export async function POST(req: Request) {
       start_date,
       end_date,
       status,
-      guest_name: r.guest_name || null,
-      guest_email: r.guest_email || null,
-      phone: r.phone || null,
-      guests_count: r.guests_count === "" || r.guests_count == null ? null : Number(r.guests_count),
-      children_count: r.children_count === "" || r.children_count == null ? null : Number(r.children_count),
-      dogs_count: r.dogs_count === "" || r.dogs_count == null ? null : Number(r.dogs_count),
-      vehicle_reg: r.vehicle_reg || null,
-      price: r.price === "" || r.price == null ? null : Number(r.price),
-      special_requests: r.special_requests || null,
+      guest_name: cleanStr(r.guest_name) || null,
+      guest_email: cleanStr((r as any).guest_email) || null,
+      phone: cleanStr((r as any).phone) || null,
+      guests_count: toNumOrNull((r as any).guests_count),
+      children_count: toNumOrNull((r as any).children_count),
+      dogs_count: toNumOrNull((r as any).dogs_count),
+      vehicle_reg: cleanStr((r as any).vehicle_reg) || null,
+      price: toNumOrNull((r as any).price),
+      special_requests: cleanStr((r as any).special_requests) || null,
     });
   }
 
-  // Chunk inserts
   const CHUNK = 200;
   for (let i = 0; i < inserts.length; i += CHUNK) {
     const chunk = inserts.slice(i, i + CHUNK);
