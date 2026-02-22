@@ -20,8 +20,10 @@ type ImportRow = {
   special_requests?: string;
 };
 
-function isOwner() {
-  return cookies().get("owner")?.value === "1";
+// Next 15: cookies() can be async in route handlers
+async function isOwner() {
+  const jar = await cookies();
+  return jar.get("owner")?.value === "1";
 }
 
 // Removes invisible unicode chars that iOS/Safari often injects
@@ -37,9 +39,7 @@ function cleanStr(v: any) {
 // Keep only digits and '-' for dates
 function cleanDate(v: any) {
   const s = cleanStr(v);
-  // remove anything except digits and hyphen
   const t = s.replace(/[^\d-]/g, "");
-  // must match YYYY-MM-DD
   if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return "";
   return t;
 }
@@ -47,14 +47,13 @@ function cleanDate(v: any) {
 function toNumOrNull(v: any) {
   const s = cleanStr(v);
   if (!s) return null;
-  // remove commas and currency symbols
   const t = s.replace(/[,£$]/g, "");
   const n = Number(t);
   return Number.isFinite(n) ? n : null;
 }
 
 export async function POST(req: Request) {
-  if (!isOwner()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await isOwner())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const supabase = supabaseServer();
   const body = await req.json().catch(() => ({}));
@@ -64,6 +63,7 @@ export async function POST(req: Request) {
 
   if (!rows.length) return NextResponse.json({ error: "No rows provided" }, { status: 400 });
 
+  // Existing confirmed bookings (only these block overlaps)
   const { data: existing, error: readErr } = await supabase
     .from("bookings")
     .select("id,start_date,end_date")
@@ -131,6 +131,7 @@ export async function POST(req: Request) {
     });
   }
 
+  // Insert in chunks
   const CHUNK = 200;
   for (let i = 0; i < inserts.length; i += CHUNK) {
     const chunk = inserts.slice(i, i + CHUNK);
