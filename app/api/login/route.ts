@@ -15,6 +15,8 @@ export async function POST(req: Request) {
   }
 
   const res = NextResponse.json({ ok: true, next });
+
+  // Secure cookie (HttpOnly so JS can’t steal it)
   res.cookies.set("owner", "1", {
     httpOnly: true,
     secure: true,
@@ -22,5 +24,6 @@ export async function POST(req: Request) {
     path: "/",
     maxAge: 60 * 60 * 24 * 30, // 30 days
   });
+
   return res;
 }
