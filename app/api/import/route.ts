@@ -112,7 +112,7 @@ export async function POST(req: Request) {
         skipped++;
         continue;
       }
-      confirmedExisting.push({ start_date, end_date });
+      confirmedExisting.push({ id: `import-${i}`, start_date, end_date } as any);
     }
 
     inserts.push({
