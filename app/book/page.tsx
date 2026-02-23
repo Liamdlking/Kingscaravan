@@ -6,6 +6,15 @@ export default function BookPage() {
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState<string>("");
 
+  const params =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search)
+      : null;
+
+  const preStart = params?.get("start") || "";
+  const preEnd = params?.get("end") || "";
+  const prePrice = params?.get("price") || "";
+
   // Terms gating
   const [termsUnlocked, setTermsUnlocked] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -13,78 +22,6 @@ export default function BookPage() {
 
   const termsText = useMemo(
     () => `TERMS & CONDITIONS (Summary + full policy notes)
-
-Accommodation & guest rules
-• The accommodation may only be used by the named guests on the booking.
-• Maximum 8 people. If more than stated guests are found in the caravan, you may be asked to leave.
-• This applies to pets, smoking/vaping, and drugs (not allowed).
-• Bookings are for family groups only. We do not accept young singles or all-male/all-female parties.
-• Spot checks may be carried out. Breaches may result in eviction without compensation.
-
-Smoking / vaping / drugs
-• No smoking or vaping inside the caravan.
-• Smoking is permitted outside only, away from hazards; dispose of cigarette butts safely.
-• Use of drugs is forbidden.
-
-Condition & reporting issues
-• On arrival, please check equipment and condition.
-• Any problems must be reported immediately so we have a fair chance to rectify.
-• Photos may be requested where helpful.
-
-Safety
-• Smoke alarms/fire extinguishers must not be tampered with (including removing batteries).
-• No naked flames (candles/BBQs) inside the caravan.
-• Do not use the fire to dry items over stools (fire hazard).
-
-Utilities & fair use
-• Gas/electric included on a fair-use basis.
-• Excessive use (e.g. heating left on constantly without consent) may be charged.
-• When leaving the caravan, ensure heating/equipment is turned off and plugs switched off
-  (except fridge/freezer and WiFi).
-
-Security
-• You are responsible for security; doors/windows must be locked when not in the caravan.
-
-Bedding / towels
-• Bedding is supplied. Towels/soaps are not.
-• If you require a cot bed, request at booking so it can be available.
-
-CCTV
-• CCTV is installed outside the caravan for security.
-• It records on motion and may be reviewed if needed (e.g. behavioural concerns).
-
-Parking
-• A permit is provided. Max 2 cars per booking.
-• Park at your own risk (loss/damage/theft not accepted as liability).
-• Permit MUST be left in the caravan after your stay — failure may result in a deduction/charge.
-• Do not drive or park on the grass.
-
-Behaviour
-• If you/your party behave in a way prejudicial to others’ wellbeing, you may be required to vacate.
-• Please avoid nuisance (verbal/excessive music). Alcohol permitted, but guests must remain civil.
-
-Caravan site / facilities / passes
-• You are bound by the park’s site rules (available via their website/reception).
-• The owner is not responsible for onsite services/facilities that may change at short notice.
-• You are renting accommodation only; entertainment passes are not included/provided.
-
-Noise notice
-• The caravan is in a busy area with amusements/bars/rides nearby; loud music may be heard.
-
-Cleaning products
-• Cleaning products are provided for hygiene—please use when needed and keep in the caravan.
-
-Cancellation
-• If you cancel before the final balance due date (8 weeks prior), you lose the £60 deposit.
-• Cancellation fees:
-  42–28 days: 50%
-  27–14 days: 75%
-  13–0 days: 100%
-• Refunds may be considered at owner discretion and subject to replacement booking.
-
-Liability & insurance
-• The owner does not accept liability for injury, loss or damage.
-• Holiday insurance is strongly recommended.
 
 By submitting this request, you confirm you have read and agree to these Terms & Conditions.`,
     []
@@ -102,20 +39,17 @@ By submitting this request, you confirm you have read and agree to these Terms &
     setMsg("");
 
     if (!termsUnlocked) {
-      setMsg("Please scroll to the bottom of the Terms & Conditions to enable acceptance.");
+      setMsg("Please scroll to the bottom of the Terms & Conditions.");
       return;
     }
     if (!termsAccepted) {
-      setMsg("Please tick the box to accept the Terms & Conditions.");
+      setMsg("Please accept the Terms & Conditions.");
       return;
     }
 
     setSending(true);
 
     const f = new FormData(e.currentTarget);
-
-    const dogsYes = String(f.get("dogs") || "no") === "yes";
-    const dogsCount = dogsYes ? Number(f.get("dogs_count") || 1) || 1 : 0;
 
     const payload = {
       status: "provisional",
@@ -126,9 +60,10 @@ By submitting this request, you confirm you have read and agree to these Terms &
       phone: String(f.get("phone") || ""),
       guests_count: Number(f.get("guests_count") || 0) || null,
       children_count: Number(f.get("children_count") || 0) || null,
-      dogs_count: dogsCount,
+      dogs_count: Number(f.get("dogs_count") || 0) || 0,
       vehicle_reg: String(f.get("vehicle_reg") || ""),
       special_requests: String(f.get("special_requests") || ""),
+      price: prePrice ? Number(prePrice) : null,
     };
 
     try {
@@ -139,13 +74,10 @@ By submitting this request, you confirm you have read and agree to these Terms &
       });
 
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "Could not submit request");
+      if (!res.ok) throw new Error(json?.error || "Could not submit");
 
-      setMsg("✅ Request sent! We’ll review and confirm availability.");
+      setMsg("✅ Booking request sent!");
       e.currentTarget.reset();
-      setTermsUnlocked(false);
-      setTermsAccepted(false);
-      if (termsBoxRef.current) termsBoxRef.current.scrollTop = 0;
     } catch (err: any) {
       setMsg(err?.message || "Something went wrong.");
     } finally {
@@ -156,116 +88,85 @@ By submitting this request, you confirm you have read and agree to these Terms &
   return (
     <div style={styles.page}>
       <div style={styles.container}>
-        <header style={{ marginBottom: 16 }}>
-          <h1 style={styles.h1}>Caravan Booking Request</h1>
-          <p style={styles.sub}>
-            Fill in the form below to request your dates. This creates a <b>provisional</b> request until we approve it.
-          </p>
-        </header>
+        <h1 style={styles.h1}>Request your stay</h1>
+
+        <p style={styles.sub}>
+          Choose your dates, add your details, and we’ll confirm availability.
+        </p>
+
+        {prePrice && (
+          <div style={styles.priceBox}>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>
+              Estimated price for selected dates
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 800 }}>£{prePrice}</div>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>
+              Final price confirmed on approval.
+            </div>
+          </div>
+        )}
 
         <form onSubmit={submit} style={{ display: "grid", gap: 14 }}>
           <section style={styles.card}>
-            <h2 style={styles.h2}>1) Choose your dates</h2>
-            <p style={styles.helpText}>Please select your arrival and departure dates.</p>
+            <h2 style={styles.h2}>Your dates</h2>
 
             <div style={styles.grid2}>
               <label style={styles.field}>
-                <span style={styles.label}>Arrival date</span>
-                <input name="start_date" type="date" required style={styles.input} />
-              </label>
-
-              <label style={styles.field}>
-                <span style={styles.label}>Departure date (checkout)</span>
-                <input name="end_date" type="date" required style={styles.input} />
-                <small style={styles.small}>Checkout day is not booked (same-day turnover allowed).</small>
-              </label>
-            </div>
-          </section>
-
-          <section style={styles.card}>
-            <h2 style={styles.h2}>2) Your details</h2>
-            <p style={styles.helpText}>So we can contact you about your request.</p>
-
-            <div style={styles.grid2}>
-              <label style={styles.field}>
-                <span style={styles.label}>Full name</span>
-                <input name="guest_name" required placeholder="e.g. Sarah Smith" style={styles.input} />
-              </label>
-
-              <label style={styles.field}>
-                <span style={styles.label}>Email</span>
-                <input name="guest_email" type="email" required placeholder="e.g. sarah@email.com" style={styles.input} />
-              </label>
-
-              <label style={styles.field}>
-                <span style={styles.label}>Phone number</span>
-                <input name="phone" required placeholder="e.g. 07xxx xxxxxx" style={styles.input} />
-              </label>
-
-              <label style={styles.field}>
-                <span style={styles.label}>Vehicle registration (optional)</span>
-                <input name="vehicle_reg" placeholder="e.g. AB12 CDE" style={styles.input} />
-              </label>
-            </div>
-          </section>
-
-          <section style={styles.card}>
-            <h2 style={styles.h2}>3) Party details</h2>
-            <p style={styles.helpText}>Please tell us who will be staying.</p>
-
-            <div style={styles.grid2}>
-              <label style={styles.field}>
-                <span style={styles.label}>Number of guests (max 8)</span>
+                Arrival
                 <input
-                  name="guests_count"
-                  type="number"
-                  min={1}
-                  max={8}
-                  defaultValue={2}
+                  name="start_date"
+                  type="date"
                   required
+                  defaultValue={preStart}
                   style={styles.input}
                 />
               </label>
 
               <label style={styles.field}>
-                <span style={styles.label}>Number of children (optional)</span>
-                <input name="children_count" type="number" min={0} max={8} defaultValue={0} style={styles.input} />
-              </label>
-
-              <label style={styles.field}>
-                <span style={styles.label}>Bringing dogs?</span>
-                <select name="dogs" defaultValue="no" style={styles.input}>
-                  <option value="no">No</option>
-                  <option value="yes">Yes</option>
-                </select>
-                <small style={styles.small}>If yes, please confirm how many below.</small>
-              </label>
-
-              <label style={styles.field}>
-                <span style={styles.label}>Number of dogs</span>
-                <input name="dogs_count" type="number" min={1} max={5} defaultValue={1} style={styles.input} />
+                Departure
+                <input
+                  name="end_date"
+                  type="date"
+                  required
+                  defaultValue={preEnd}
+                  style={styles.input}
+                />
               </label>
             </div>
           </section>
 
           <section style={styles.card}>
-            <h2 style={styles.h2}>4) Special requests</h2>
-            <p style={styles.helpText}>Optional, but helpful.</p>
+            <h2 style={styles.h2}>Your details</h2>
 
-            <label style={styles.field}>
-              <span style={styles.label}>Anything we should know?</span>
-              <textarea
-                name="special_requests"
-                rows={4}
-                placeholder="e.g. accessibility needs, questions, etc."
-                style={{ ...styles.input, resize: "vertical" }}
-              />
-            </label>
+            <div style={styles.grid2}>
+              <input name="guest_name" placeholder="Full name" required style={styles.input} />
+              <input name="guest_email" type="email" placeholder="Email" required style={styles.input} />
+              <input name="phone" placeholder="Phone number" required style={styles.input} />
+              <input name="vehicle_reg" placeholder="Vehicle registration" style={styles.input} />
+            </div>
           </section>
 
           <section style={styles.card}>
-            <h2 style={styles.h2}>5) Terms & Conditions</h2>
-            <p style={styles.helpText}>Please scroll to the bottom to unlock the acceptance checkbox.</p>
+            <h2 style={styles.h2}>Party</h2>
+
+            <div style={styles.grid2}>
+              <input name="guests_count" type="number" placeholder="Guests" style={styles.input} />
+              <input name="children_count" type="number" placeholder="Children" style={styles.input} />
+              <input name="dogs_count" type="number" placeholder="Dogs" style={styles.input} />
+            </div>
+          </section>
+
+          <section style={styles.card}>
+            <textarea
+              name="special_requests"
+              placeholder="Special requests"
+              rows={3}
+              style={styles.input}
+            />
+          </section>
+
+          <section style={styles.card}>
+            <h2 style={styles.h2}>Terms</h2>
 
             <div
               ref={termsBoxRef}
@@ -275,22 +176,19 @@ By submitting this request, you confirm you have read and agree to these Terms &
               {termsText}
             </div>
 
-            <label style={styles.termsRow}>
+            <label style={{ marginTop: 10 }}>
               <input
                 type="checkbox"
-                name="terms"
                 disabled={!termsUnlocked}
                 checked={termsAccepted}
                 onChange={(e) => setTermsAccepted(e.target.checked)}
-              />
-              <span style={{ fontSize: 13, opacity: termsUnlocked ? 0.9 : 0.6 }}>
-                I have read and agree to the Terms & Conditions (checkbox unlocks after scrolling).
-              </span>
+              />{" "}
+              I agree to the Terms & Conditions
             </label>
           </section>
 
           <button type="submit" disabled={sending} style={styles.button}>
-            {sending ? "Sending…" : "Send booking request"}
+            {sending ? "Sending…" : "Send request"}
           </button>
 
           {msg && <div style={styles.message}>{msg}</div>}
@@ -300,100 +198,17 @@ By submitting this request, you confirm you have read and agree to these Terms &
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: "100vh",
-    background: "#f6f7fb",
-    padding: 20,
-    fontFamily:
-      "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji",
-  },
-  container: {
-    maxWidth: 860,
-    margin: "0 auto",
-  },
-  h1: {
-    margin: "0 0 6px",
-    fontSize: 28,
-    letterSpacing: -0.2,
-  },
-  sub: {
-    margin: 0,
-    opacity: 0.8,
-    lineHeight: 1.4,
-  },
-  card: {
-    background: "white",
-    border: "1px solid #e7e7ea",
-    borderRadius: 14,
-    padding: 16,
-    boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-  },
-  h2: {
-    margin: "0 0 6px",
-    fontSize: 16,
-  },
-  helpText: {
-    margin: "0 0 12px",
-    fontSize: 13,
-    opacity: 0.75,
-  },
-  grid2: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: 12,
-  },
-  field: {
-    display: "grid",
-    gap: 6,
-  },
-  label: {
-    fontSize: 13,
-    opacity: 0.85,
-  },
-  input: {
-    padding: "10px 12px",
-    borderRadius: 10,
-    border: "1px solid #d9d9de",
-    background: "white",
-    fontSize: 14,
-    outline: "none",
-  },
-  small: {
-    fontSize: 12,
-    opacity: 0.7,
-    marginTop: -2,
-  },
-  termsBox: {
-    border: "1px solid #ddd",
-    borderRadius: 12,
-    padding: 12,
-    maxHeight: 260,
-    overflowY: "auto",
-    background: "#fafafa",
-    whiteSpace: "pre-wrap",
-    fontSize: 13,
-    lineHeight: 1.35,
-  },
-  termsRow: {
-    display: "flex",
-    gap: 10,
-    alignItems: "flex-start",
-    marginTop: 12,
-  },
-  button: {
-    padding: "12px 14px",
-    borderRadius: 12,
-    border: "1px solid #ddd",
-    background: "white",
-    cursor: "pointer",
-    fontSize: 15,
-    fontWeight: 600,
-  },
-  message: {
-    padding: 12,
-    borderRadius: 12,
-    border: "1px solid #e6e6e6",
-    background: "white",
-  },
+const styles: any = {
+  page: { background: "#f6f7fb", padding: 20, minHeight: "100vh" },
+  container: { maxWidth: 820, margin: "0 auto" },
+  h1: { fontSize: 28 },
+  sub: { opacity: 0.7 },
+  card: { background: "white", padding: 16, borderRadius: 12, border: "1px solid #eee" },
+  grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
+  field: { display: "grid", gap: 6 },
+  input: { padding: 10, borderRadius: 10, border: "1px solid #ddd" },
+  termsBox: { maxHeight: 200, overflowY: "auto", border: "1px solid #ddd", padding: 10 },
+  button: { padding: 12, borderRadius: 12, border: "1px solid #ddd", cursor: "pointer" },
+  message: { padding: 10, background: "white", borderRadius: 10 },
+  priceBox: { padding: 16, background: "#fff", borderRadius: 12, border: "1px solid #eee", marginBottom: 12 },
 };
