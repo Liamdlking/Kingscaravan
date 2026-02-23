@@ -65,6 +65,30 @@ function fmtRange(start: string, end: string) {
   return `${start} → ${end}`;
 }
 
+function calcBookingPrice(startISO: string, endISO: string, rates: Rate[]) {
+  // 1) exact TOTAL match
+  const exactTotal = rates.find(
+    (r) => r.rate_type === "total" && r.start_date === startISO && r.end_date === endISO
+  );
+  if (exactTotal) {
+    return { ok: true as const, total: Number(exactTotal.price), method: "total" as const };
+  }
+
+  // 2) sum nightly across [start,end)
+  const nights = eachDay(startISO, endISO);
+  let total = 0;
+
+  for (const day of nights) {
+    const nightly = rates.find(
+      (r) => r.rate_type === "nightly" && r.start_date <= day && day < r.end_date
+    );
+    if (!nightly) return { ok: false as const, total: null, method: "missing" as const };
+    total += Number(nightly.price);
+  }
+
+  return { ok: true as const, total, method: "nightly" as const };
+}
+
 export default function Dashboard() {
   const [mode, setMode] = useState<"bookings" | "pricing">("bookings");
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -318,6 +342,15 @@ export default function Dashboard() {
     return copy;
   }, [bookings]);
 
+  const bookingPriceMap = useMemo(() => {
+    const map = new Map<string, { ok: boolean; total: number | null; method: string }>();
+    for (const b of bookings) {
+      const p = calcBookingPrice(b.start_date, b.end_date, rates);
+      map.set(b.id, { ok: p.ok, total: p.total, method: p.method });
+    }
+    return map;
+  }, [bookings, rates]);
+
   return (
     <div style={styles.page}>
       <style>{`
@@ -404,7 +437,7 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* ✅ QUICK VIEW LIST */}
+          {/* ✅ QUICK VIEW LIST (with price badge) */}
           <div style={styles.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
               <h2 style={{ margin: 0, fontSize: 16 }}>Bookings (quick view)</h2>
@@ -421,6 +454,12 @@ export default function Dashboard() {
                     status === "confirmed"
                       ? { bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.35)", text: "#b91c1c", label: "Confirmed" }
                       : { bg: "rgba(245,158,11,0.14)", border: "rgba(245,158,11,0.4)", text: "#92400e", label: "Provisional" };
+
+                  const price = bookingPriceMap.get(b.id);
+                  const priceBadge =
+                    price?.ok && typeof price.total === "number"
+                      ? { label: `£${price.total}`, ok: true }
+                      : { label: "Price not set", ok: false };
 
                   return (
                     <button
@@ -442,19 +481,36 @@ export default function Dashboard() {
                           <div style={{ fontSize: 13, opacity: 0.75 }}>{fmtRange(b.start_date, b.end_date)}</div>
                         </div>
 
-                        <div
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 800,
-                            padding: "6px 10px",
-                            borderRadius: 999,
-                            border: `1px solid ${pill.border}`,
-                            background: pill.bg,
-                            color: pill.text,
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {pill.label}
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 900,
+                              padding: "6px 10px",
+                              borderRadius: 999,
+                              border: `1px solid ${priceBadge.ok ? "rgba(34,197,94,0.45)" : "rgba(0,0,0,0.12)"}`,
+                              background: priceBadge.ok ? "rgba(34,197,94,0.12)" : "rgba(0,0,0,0.04)",
+                              color: priceBadge.ok ? "#14532d" : "rgba(0,0,0,0.55)",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {priceBadge.label}
+                          </div>
+
+                          <div
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 800,
+                              padding: "6px 10px",
+                              borderRadius: 999,
+                              border: `1px solid ${pill.border}`,
+                              background: pill.bg,
+                              color: pill.text,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {pill.label}
+                          </div>
                         </div>
                       </div>
 
@@ -686,15 +742,55 @@ export default function Dashboard() {
       </div>
     </div>
   );
-}
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label style={{ display: "grid", gap: 6, marginTop: 10 }}>
-      <span style={{ fontSize: 12, opacity: 0.75 }}>{label}</span>
-      {children}
-    </label>
-  );
+  function Field({ label, children }: { label: string; children: React.ReactNode }) {
+    return (
+      <label style={{ display: "grid", gap: 6, marginTop: 10 }}>
+        <span style={{ fontSize: 12, opacity: 0.75 }}>{label}</span>
+        {children}
+      </label>
+    );
+  }
+
+  async function saveRate() {
+    if (!editor || editor.type !== "rate") return;
+
+    const start_date = String(editor.draft.start_date ?? editor.rate.start_date ?? "");
+    const end_date = String(editor.draft.end_date ?? editor.rate.end_date ?? "");
+    const price = Number(editor.draft.price ?? 0);
+    const rate_type = (editor.draft.rate_type ?? "total") as "nightly" | "total";
+    const note = String(editor.draft.note ?? "");
+
+    if (!start_date || !end_date) {
+      setEditor({ ...editor, err: "Start and end dates are required." });
+      return;
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      setEditor({ ...editor, err: "Enter a valid price." });
+      return;
+    }
+
+    setEditor({ ...editor, saving: true, err: "" });
+
+    if (editor.rate.id) {
+      await fetch(`/api/rates?id=${encodeURIComponent(editor.rate.id)}`, { method: "DELETE" });
+    }
+
+    const res = await fetch("/api/rates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ start_date, end_date, price, rate_type, note: note || null }),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      setEditor({ ...editor, saving: false, err: json?.error || "Could not save rate" });
+      return;
+    }
+
+    setEditor(null);
+    await loadAll();
+  }
 }
 
 const styles: Record<string, React.CSSProperties> = {
