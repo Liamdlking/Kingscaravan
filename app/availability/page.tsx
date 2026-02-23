@@ -3,8 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
-import interactionPlugin from "@fullcalendar/interaction";
-import type { DateClickArg } from "@fullcalendar/core";
+import interactionPlugin, { DateClickArg } from "@fullcalendar/interaction";
 
 type Booking = {
   start_date: string;
@@ -26,12 +25,6 @@ function iso(d: Date) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
-}
-
-function addDays(isoDate: string, days: number) {
-  const d = new Date(`${isoDate}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
 }
 
 function eachDay(startISO: string, endISO: string) {
@@ -95,13 +88,9 @@ export default function AvailabilityPage() {
   const [rates, setRates] = useState<Rate[]>([]);
   const [msg, setMsg] = useState<string>("");
 
+  // click-to-select
   const [checkIn, setCheckIn] = useState<string | null>(null);
   const [checkOut, setCheckOut] = useState<string | null>(null);
-
-  const priceInfo = useMemo(() => {
-    if (!checkIn || !checkOut) return null;
-    return calcPrice(checkIn, checkOut, rates);
-  }, [checkIn, checkOut, rates]);
 
   useEffect(() => {
     (async () => {
@@ -140,21 +129,26 @@ export default function AvailabilityPage() {
     return ["day-available"];
   };
 
-  // Visual: show selected range as a background highlight
+  const priceInfo = useMemo(() => {
+    if (!checkIn || !checkOut) return null;
+    return calcPrice(checkIn, checkOut, rates);
+  }, [checkIn, checkOut, rates]);
+
+  // Visual: show selected range as background
   const selectionEvent = useMemo(() => {
     if (!checkIn || !checkOut) return [];
     return [
       {
         id: "selected-range",
         start: checkIn,
-        end: checkOut,
+        end: checkOut, // checkout day (exclusive)
         display: "background" as const,
         backgroundColor: "rgba(59,130,246,0.18)",
       },
     ];
   }, [checkIn, checkOut]);
 
-  // Optional: show rate spans as faint background (still visible)
+  // faint rate spans (optional)
   const rateEvents = useMemo(() => {
     return rates.map((r) => ({
       id: `rate-${r.id}`,
@@ -162,7 +156,7 @@ export default function AvailabilityPage() {
       end: r.end_date,
       title: "",
       display: "background" as const,
-      backgroundColor: "rgba(34,197,94,0.10)",
+      backgroundColor: "rgba(34,197,94,0.08)",
     }));
   }, [rates]);
 
@@ -170,20 +164,18 @@ export default function AvailabilityPage() {
     setMsg("");
     const clicked = arg.date.toISOString().slice(0, 10);
 
-    // Disallow starting on booked day (confirmed)
-    if (!checkIn && confirmedDates.has(clicked)) {
-      setMsg("That date is not available. Please choose an available check-in date.");
-      return;
-    }
-
-    // 1st click sets check-in
+    // If starting selection
     if (!checkIn) {
+      if (confirmedDates.has(clicked)) {
+        setMsg("That date is not available. Please choose an available check-in date.");
+        return;
+      }
       setCheckIn(clicked);
       setCheckOut(null);
       return;
     }
 
-    // 2nd click sets checkout (must be after check-in)
+    // Setting checkout
     if (checkIn && !checkOut) {
       if (clicked <= checkIn) {
         setMsg("Checkout must be after check-in. Please choose a later date.");
@@ -191,7 +183,7 @@ export default function AvailabilityPage() {
       }
 
       const start = checkIn;
-      const end = clicked; // checkout day (exclusive). User clicked checkout day.
+      const end = clicked; // user clicked checkout day
 
       const rule = isAllowedPattern(start, end);
       if (!rule.ok) {
@@ -208,7 +200,11 @@ export default function AvailabilityPage() {
       return;
     }
 
-    // If both already set, clicking starts a fresh selection
+    // If both set, start again
+    if (confirmedDates.has(clicked)) {
+      setMsg("That date is not available. Please choose an available check-in date.");
+      return;
+    }
     setCheckIn(clicked);
     setCheckOut(null);
   }
@@ -291,7 +287,15 @@ export default function AvailabilityPage() {
               )}
 
               {checkIn && checkOut && (
-                <div style={{ padding: 12, borderRadius: 12, border: "1px solid #eee", background: "#fafafa", marginBottom: 12 }}>
+                <div
+                  style={{
+                    padding: 12,
+                    borderRadius: 12,
+                    border: "1px solid #eee",
+                    background: "#fafafa",
+                    marginBottom: 12,
+                  }}
+                >
                   <div style={{ fontSize: 12, opacity: 0.7 }}>Estimated price</div>
                   {priceInfo?.ok ? (
                     <div style={{ fontSize: 22, fontWeight: 900 }}>£{priceInfo.total}</div>
@@ -345,7 +349,15 @@ export default function AvailabilityPage() {
           )}
 
           {msg && (
-            <div style={{ marginTop: 12, padding: 10, borderRadius: 10, border: "1px solid #ffd0d0", background: "#fff3f3" }}>
+            <div
+              style={{
+                marginTop: 12,
+                padding: 10,
+                borderRadius: 10,
+                border: "1px solid #ffd0d0",
+                background: "#fff3f3",
+              }}
+            >
               {msg}
             </div>
           )}
