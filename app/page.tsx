@@ -8,8 +8,8 @@ import type { DateSelectArg, EventClickArg } from "@fullcalendar/core";
 
 type Booking = {
   id: string;
-  start_date: string;
-  end_date: string; // checkout day (NOT booked)
+  start_date: string; // YYYY-MM-DD
+  end_date: string; // YYYY-MM-DD checkout day (NOT booked)
   status?: "provisional" | "confirmed" | null;
 
   guest_name: string | null;
@@ -31,8 +31,8 @@ type Booking = {
 
 type Rate = {
   id: string;
-  start_date: string;
-  end_date: string;
+  start_date: string; // YYYY-MM-DD
+  end_date: string; // YYYY-MM-DD exclusive
   price: number;
   rate_type: "nightly" | "total";
   note?: string | null;
@@ -48,6 +48,17 @@ function isoLocal(d: Date) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function eachDay(startISO: string, endISO: string) {
+  // days in [startISO, endISO) - end is exclusive
+  const out: string[] = [];
+  const start = new Date(`${startISO}T00:00:00Z`);
+  const end = new Date(`${endISO}T00:00:00Z`);
+  for (let d = new Date(start); d < end; d.setUTCDate(d.getUTCDate() + 1)) {
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
 }
 
 export default function Dashboard() {
@@ -72,10 +83,9 @@ export default function Dashboard() {
 
   async function onSelect(sel: DateSelectArg) {
     const start_date = isoLocal(sel.start);
-    const end_date = isoLocal(sel.end); // end-exclusive selection from FullCalendar (fine for owner-side blocks)
+    const end_date = isoLocal(sel.end); // FullCalendar select end is exclusive (fine for internal blocks)
 
     if (mode === "bookings") {
-      // Create a placeholder booking then open it
       const res = await fetch("/api/bookings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -97,7 +107,7 @@ export default function Dashboard() {
       return;
     }
 
-    // PRICING MODE: create a draft rate editor (saved when you click Save)
+    // Pricing mode: create a new draft rate editor
     setEditor({
       type: "rate",
       rate: { id: "", start_date, end_date, price: 0, rate_type: "total", note: null },
@@ -113,7 +123,6 @@ export default function Dashboard() {
       setEditor({ type: "booking", booking: b, draft: { ...b } });
       return;
     }
-
     if (ext.kind === "rate") {
       const r: Rate = ext.rate;
       setEditor({ type: "rate", rate: r, draft: { ...r } });
@@ -195,7 +204,6 @@ export default function Dashboard() {
 
     setEditor({ ...editor, saving: true, err: "" });
 
-    // If editing an existing rate: delete then insert (simple + reliable)
     if (editor.rate.id) {
       await fetch(`/api/rates?id=${encodeURIComponent(editor.rate.id)}`, { method: "DELETE" });
     }
@@ -223,14 +231,60 @@ export default function Dashboard() {
     await loadAll();
   }
 
+  // --- HALF-DAY MARKERS (check-in / checkout) ---
+  const markers = useMemo(() => {
+    const confirmedFull = new Set<string>();
+    const provisionalFull = new Set<string>();
+
+    const inConfirmed = new Set<string>();
+    const inProvisional = new Set<string>();
+
+    const outConfirmed = new Set<string>();
+    const outProvisional = new Set<string>();
+
+    for (const b of bookings) {
+      const days = eachDay(b.start_date, b.end_date); // nights booked (end exclusive)
+      const status = (b.status ?? "confirmed") as "confirmed" | "provisional";
+
+      if (status === "confirmed") {
+        days.forEach((d) => confirmedFull.add(d));
+        inConfirmed.add(b.start_date);
+        outConfirmed.add(b.end_date); // checkout day
+      } else {
+        days.forEach((d) => provisionalFull.add(d));
+        inProvisional.add(b.start_date);
+        outProvisional.add(b.end_date);
+      }
+    }
+
+    return { confirmedFull, provisionalFull, inConfirmed, inProvisional, outConfirmed, outProvisional };
+  }, [bookings]);
+
+  const dayCellClassNames = (info: any) => {
+    const d = isoLocal(info.date);
+    const classes: string[] = [];
+
+    if (markers.confirmedFull.has(d)) classes.push("day-confirmed");
+    else if (markers.provisionalFull.has(d)) classes.push("day-provisional");
+    else classes.push("day-available");
+
+    // right half = check-in, left half = checkout
+    if (markers.inConfirmed.has(d)) classes.push("in-confirmed");
+    if (markers.inProvisional.has(d)) classes.push("in-provisional");
+    if (markers.outConfirmed.has(d)) classes.push("out-confirmed");
+    if (markers.outProvisional.has(d)) classes.push("out-provisional");
+
+    return classes;
+  };
+
   const events = useMemo(() => {
     const rateEvents = rates.map((r) => ({
       id: `rate-${r.id}`,
       title: r.rate_type === "nightly" ? `£${r.price}/night` : `£${r.price} total`,
       start: r.start_date,
       end: r.end_date,
-      backgroundColor: "rgba(34,197,94,0.18)",
-      borderColor: "rgba(34,197,94,0.55)",
+      backgroundColor: "rgba(34,197,94,0.16)",
+      borderColor: "rgba(34,197,94,0.45)",
       textColor: "#0f5132",
       extendedProps: { kind: "rate", rate: r },
     }));
@@ -255,6 +309,44 @@ export default function Dashboard() {
 
   return (
     <div style={styles.page}>
+      <style>{`
+        /* base day colours */
+        .day-available { background: rgba(34,197,94,0.10); }
+        .day-confirmed { background: rgba(239,68,68,0.12); }
+        .day-provisional { background: rgba(245,158,11,0.14); }
+
+        /* day cell styling */
+        .fc .fc-daygrid-day-frame {
+          border-radius: 10px;
+          overflow: hidden;
+          position: relative;
+        }
+
+        /* half overlays (left=checkout, right=check-in) */
+        .fc .fc-daygrid-day-frame::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          background: linear-gradient(
+            90deg,
+            var(--leftOverlay, transparent) 0%,
+            var(--leftOverlay, transparent) 50%,
+            var(--rightOverlay, transparent) 50%,
+            var(--rightOverlay, transparent) 100%
+          );
+          opacity: 1;
+        }
+
+        /* confirmed overlays */
+        .out-confirmed { --leftOverlay: rgba(239,68,68,0.26); }
+        .in-confirmed { --rightOverlay: rgba(239,68,68,0.26); }
+
+        /* provisional overlays */
+        .out-provisional { --leftOverlay: rgba(245,158,11,0.28); }
+        .in-provisional { --rightOverlay: rgba(245,158,11,0.28); }
+      `}</style>
+
       <div style={styles.header}>
         <div>
           <h1 style={{ margin: 0, fontSize: 22 }}>Caravan Dashboard</h1>
@@ -293,6 +385,7 @@ export default function Dashboard() {
               eventClick={onEventClick}
               events={events}
               height="auto"
+              dayCellClassNames={dayCellClassNames}
             />
           )}
         </div>
