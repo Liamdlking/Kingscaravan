@@ -89,6 +89,15 @@ function calcBookingPrice(startISO: string, endISO: string, rates: Rate[]) {
   return { ok: true as const, total, method: "nightly" as const };
 }
 
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: "grid", gap: 6, marginTop: 10 }}>
+      <span style={{ fontSize: 12, opacity: 0.75 }}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
 export default function Dashboard() {
   const [mode, setMode] = useState<"bookings" | "pricing">("bookings");
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -231,7 +240,7 @@ export default function Dashboard() {
 
     setEditor({ ...editor, saving: true, err: "" });
 
-    // If editing an existing rate, delete it and re-insert (simple + reliable)
+    // If editing an existing rate, delete it and re-insert
     if (editor.rate.id) {
       await fetch(`/api/rates?id=${encodeURIComponent(editor.rate.id)}`, { method: "DELETE" });
     }
@@ -289,7 +298,6 @@ export default function Dashboard() {
   }, [bookings]);
 
   const dayCellClassNames = (info: any) => {
-    // IMPORTANT: use UTC date string from FullCalendar to avoid timezone drift
     const d = info.date.toISOString().slice(0, 10);
     const classes: string[] = [];
 
@@ -297,7 +305,6 @@ export default function Dashboard() {
     else if (markers.provisionalFull.has(d)) classes.push("day-provisional");
     else classes.push("day-available");
 
-    // right half = check-in, left half = checkout
     if (markers.inConfirmed.has(d)) classes.push("in-confirmed");
     if (markers.inProvisional.has(d)) classes.push("in-provisional");
     if (markers.outConfirmed.has(d)) classes.push("out-confirmed");
@@ -354,7 +361,6 @@ export default function Dashboard() {
   return (
     <div style={styles.page}>
       <style>{`
-        /* Base day colouring must be applied to the FRAME */
         .fc .fc-daygrid-day.day-available .fc-daygrid-day-frame { background: rgba(34,197,94,0.10); }
         .fc .fc-daygrid-day.day-confirmed .fc-daygrid-day-frame { background: rgba(239,68,68,0.12); }
         .fc .fc-daygrid-day.day-provisional .fc-daygrid-day-frame { background: rgba(245,158,11,0.14); }
@@ -365,7 +371,6 @@ export default function Dashboard() {
           position: relative;
         }
 
-        /* Half overlay layer */
         .fc .fc-daygrid-day-frame::after {
           content: "";
           position: absolute;
@@ -381,14 +386,12 @@ export default function Dashboard() {
           );
         }
 
-        /* Set overlay vars on the DAY CELL so they inherit */
         .fc .fc-daygrid-day.out-confirmed { --leftOverlay: rgba(239,68,68,0.26); }
         .fc .fc-daygrid-day.in-confirmed  { --rightOverlay: rgba(239,68,68,0.26); }
 
         .fc .fc-daygrid-day.out-provisional { --leftOverlay: rgba(245,158,11,0.28); }
         .fc .fc-daygrid-day.in-provisional  { --rightOverlay: rgba(245,158,11,0.28); }
 
-        /* Keep text above overlay */
         .fc .fc-daygrid-day-top,
         .fc .fc-daygrid-day-events { position: relative; z-index: 1; }
       `}</style>
@@ -437,7 +440,6 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* ✅ QUICK VIEW LIST (with price badge) */}
           <div style={styles.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
               <h2 style={{ margin: 0, fontSize: 16 }}>Bookings (quick view)</h2>
@@ -742,55 +744,6 @@ export default function Dashboard() {
       </div>
     </div>
   );
-
-  function Field({ label, children }: { label: string; children: React.ReactNode }) {
-    return (
-      <label style={{ display: "grid", gap: 6, marginTop: 10 }}>
-        <span style={{ fontSize: 12, opacity: 0.75 }}>{label}</span>
-        {children}
-      </label>
-    );
-  }
-
-  async function saveRate() {
-    if (!editor || editor.type !== "rate") return;
-
-    const start_date = String(editor.draft.start_date ?? editor.rate.start_date ?? "");
-    const end_date = String(editor.draft.end_date ?? editor.rate.end_date ?? "");
-    const price = Number(editor.draft.price ?? 0);
-    const rate_type = (editor.draft.rate_type ?? "total") as "nightly" | "total";
-    const note = String(editor.draft.note ?? "");
-
-    if (!start_date || !end_date) {
-      setEditor({ ...editor, err: "Start and end dates are required." });
-      return;
-    }
-    if (!Number.isFinite(price) || price < 0) {
-      setEditor({ ...editor, err: "Enter a valid price." });
-      return;
-    }
-
-    setEditor({ ...editor, saving: true, err: "" });
-
-    if (editor.rate.id) {
-      await fetch(`/api/rates?id=${encodeURIComponent(editor.rate.id)}`, { method: "DELETE" });
-    }
-
-    const res = await fetch("/api/rates", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ start_date, end_date, price, rate_type, note: note || null }),
-    });
-
-    const json = await res.json();
-    if (!res.ok) {
-      setEditor({ ...editor, saving: false, err: json?.error || "Could not save rate" });
-      return;
-    }
-
-    setEditor(null);
-    await loadAll();
-  }
 }
 
 const styles: Record<string, React.CSSProperties> = {
