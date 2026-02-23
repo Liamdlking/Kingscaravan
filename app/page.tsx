@@ -9,7 +9,7 @@ import type { DateSelectArg, EventClickArg } from "@fullcalendar/core";
 type Booking = {
   id: string;
   start_date: string; // YYYY-MM-DD
-  end_date: string; // YYYY-MM-DD checkout day (NOT booked)
+  end_date: string; // YYYY-MM-DD (checkout day, NOT booked)
   status?: "provisional" | "confirmed" | null;
 
   guest_name: string | null;
@@ -83,7 +83,7 @@ export default function Dashboard() {
 
   async function onSelect(sel: DateSelectArg) {
     const start_date = isoLocal(sel.start);
-    const end_date = isoLocal(sel.end); // FullCalendar select end is exclusive (fine for internal blocks)
+    const end_date = isoLocal(sel.end); // FullCalendar select end is exclusive
 
     if (mode === "bookings") {
       const res = await fetch("/api/bookings", {
@@ -107,7 +107,7 @@ export default function Dashboard() {
       return;
     }
 
-    // Pricing mode: create a new draft rate editor
+    // Pricing mode
     setEditor({
       type: "rate",
       rate: { id: "", start_date, end_date, price: 0, rate_type: "total", note: null },
@@ -146,7 +146,6 @@ export default function Dashboard() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id: editor.booking.id,
-
         start_date: d.start_date,
         end_date: d.end_date,
         status: d.status ?? "provisional",
@@ -243,7 +242,7 @@ export default function Dashboard() {
     const outProvisional = new Set<string>();
 
     for (const b of bookings) {
-      const days = eachDay(b.start_date, b.end_date); // nights booked (end exclusive)
+      const days = eachDay(b.start_date, b.end_date); // booked nights
       const status = (b.status ?? "confirmed") as "confirmed" | "provisional";
 
       if (status === "confirmed") {
@@ -261,7 +260,8 @@ export default function Dashboard() {
   }, [bookings]);
 
   const dayCellClassNames = (info: any) => {
-    const d = isoLocal(info.date);
+    // IMPORTANT: use UTC date string from FullCalendar to avoid timezone drift
+    const d = info.date.toISOString().slice(0, 10);
     const classes: string[] = [];
 
     if (markers.confirmedFull.has(d)) classes.push("day-confirmed");
@@ -283,7 +283,7 @@ export default function Dashboard() {
       title: r.rate_type === "nightly" ? `£${r.price}/night` : `£${r.price} total`,
       start: r.start_date,
       end: r.end_date,
-      backgroundColor: "rgba(34,197,94,0.16)",
+      backgroundColor: "rgba(34,197,94,0.18)",
       borderColor: "rgba(34,197,94,0.45)",
       textColor: "#0f5132",
       extendedProps: { kind: "rate", rate: r },
@@ -310,24 +310,24 @@ export default function Dashboard() {
   return (
     <div style={styles.page}>
       <style>{`
-        /* base day colours */
-        .day-available { background: rgba(34,197,94,0.10); }
-        .day-confirmed { background: rgba(239,68,68,0.12); }
-        .day-provisional { background: rgba(245,158,11,0.14); }
+        /* Base day colouring must be applied to the FRAME */
+        .fc .fc-daygrid-day.day-available .fc-daygrid-day-frame { background: rgba(34,197,94,0.10); }
+        .fc .fc-daygrid-day.day-confirmed .fc-daygrid-day-frame { background: rgba(239,68,68,0.12); }
+        .fc .fc-daygrid-day.day-provisional .fc-daygrid-day-frame { background: rgba(245,158,11,0.14); }
 
-        /* day cell styling */
         .fc .fc-daygrid-day-frame {
           border-radius: 10px;
           overflow: hidden;
           position: relative;
         }
 
-        /* half overlays (left=checkout, right=check-in) */
-        .fc .fc-daygrid-day-frame::before {
+        /* Half overlay layer */
+        .fc .fc-daygrid-day-frame::after {
           content: "";
           position: absolute;
           inset: 0;
           pointer-events: none;
+          border-radius: 10px;
           background: linear-gradient(
             90deg,
             var(--leftOverlay, transparent) 0%,
@@ -335,16 +335,18 @@ export default function Dashboard() {
             var(--rightOverlay, transparent) 50%,
             var(--rightOverlay, transparent) 100%
           );
-          opacity: 1;
         }
 
-        /* confirmed overlays */
-        .out-confirmed { --leftOverlay: rgba(239,68,68,0.26); }
-        .in-confirmed { --rightOverlay: rgba(239,68,68,0.26); }
+        /* Set overlay vars on the DAY CELL so they inherit */
+        .fc .fc-daygrid-day.out-confirmed { --leftOverlay: rgba(239,68,68,0.26); }
+        .fc .fc-daygrid-day.in-confirmed  { --rightOverlay: rgba(239,68,68,0.26); }
 
-        /* provisional overlays */
-        .out-provisional { --leftOverlay: rgba(245,158,11,0.28); }
-        .in-provisional { --rightOverlay: rgba(245,158,11,0.28); }
+        .fc .fc-daygrid-day.out-provisional { --leftOverlay: rgba(245,158,11,0.28); }
+        .fc .fc-daygrid-day.in-provisional  { --rightOverlay: rgba(245,158,11,0.28); }
+
+        /* Keep text above overlay */
+        .fc .fc-daygrid-day-top,
+        .fc .fc-daygrid-day-events { position: relative; z-index: 1; }
       `}</style>
 
       <div style={styles.header}>
@@ -352,7 +354,7 @@ export default function Dashboard() {
           <h1 style={{ margin: 0, fontSize: 22 }}>Caravan Dashboard</h1>
           <div style={{ opacity: 0.75, marginTop: 6 }}>
             {mode === "bookings"
-              ? "Bookings mode: drag to add booking • click to edit."
+              ? "Bookings mode: drag to add booking • click booking to edit."
               : "Pricing mode: drag to add price block • click price to edit/delete."}
           </div>
         </div>
