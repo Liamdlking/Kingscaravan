@@ -4,15 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import type { DateSelectArg } from "@fullcalendar/core";
-
-type Booking = {
-  id: string;
-  start_date: string;
-  end_date: string;
-  guest_name: string;
-  status: "provisional" | "confirmed";
-};
+import type { DateSelectArg, EventClickArg } from "@fullcalendar/core";
 
 type Rate = {
   id: string;
@@ -26,73 +18,78 @@ function iso(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
-export default function Home() {
-  const [mode, setMode] = useState<"bookings" | "pricing">("bookings");
-  const [bookings, setBookings] = useState<Booking[]>([]);
+export default function Dashboard() {
+  const [mode, setMode] = useState<"bookings" | "pricing">("pricing");
   const [rates, setRates] = useState<Rate[]>([]);
 
   async function load() {
-    const b = await fetch("/api/bookings").then(r => r.json());
-    setBookings(b.bookings ?? []);
-
-    const r = await fetch("/api/rates").then(r => r.json());
-    setRates(r.rates ?? []);
+    const res = await fetch("/api/rates");
+    const json = await res.json();
+    setRates(json.rates ?? []);
   }
 
   useEffect(() => { load(); }, []);
 
   async function onSelect(sel: DateSelectArg) {
+    if (mode !== "pricing") return;
+
     const start = iso(sel.start);
     const end = iso(sel.end);
 
-    if (mode === "pricing") {
-      const priceStr = window.prompt("Enter price (£)");
-      if (!priceStr) return;
+    const price = prompt("Enter price (£)");
+    if (!price) return;
 
-      const rateType = window.confirm(
-        "OK = nightly rate\nCancel = total price"
-      ) ? "nightly" : "total";
+    const rateType = confirm("OK = nightly rate\nCancel = total price")
+      ? "nightly"
+      : "total";
 
-      await fetch("/api/rates", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          start_date: start,
-          end_date: end,
-          price: Number(priceStr),
-          rate_type: rateType
-        })
-      });
-
-      await load();
-      return;
-    }
-
-    const name = window.prompt("Guest name");
-    if (!name) return;
-
-    await fetch("/api/bookings", {
+    await fetch("/api/rates", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         start_date: start,
         end_date: end,
-        guest_name: name,
-        status: "confirmed"
+        price: Number(price),
+        rate_type: rateType
       })
     });
 
     await load();
   }
 
-  const bookingEvents = useMemo(() => {
-    return bookings.map(b => ({
-      title: b.guest_name,
-      start: b.start_date,
-      end: b.end_date,
-      backgroundColor: b.status === "confirmed" ? "#ef4444" : "#f59e0b"
-    }));
-  }, [bookings]);
+  async function onEventClick(arg: EventClickArg) {
+    const rate = arg.event.extendedProps.rate as Rate;
+    if (!rate) return;
+
+    const action = prompt(
+      `Rate £${rate.price}\nType: ${rate.rate_type}\n\nType:\nedit — change price\ndelete — remove`
+    );
+
+    if (action === "delete") {
+      await fetch(`/api/rates?id=${rate.id}`, { method: "DELETE" });
+      await load();
+    }
+
+    if (action === "edit") {
+      const newPrice = prompt("New price (£)", String(rate.price));
+      if (!newPrice) return;
+
+      await fetch("/api/rates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start_date: rate.start_date,
+          end_date: rate.end_date,
+          price: Number(newPrice),
+          rate_type: rate.rate_type
+        })
+      });
+
+      await fetch(`/api/rates?id=${rate.id}`, { method: "DELETE" });
+
+      await load();
+    }
+  }
 
   const rateEvents = useMemo(() => {
     return rates.map(r => ({
@@ -100,39 +97,28 @@ export default function Home() {
       start: r.start_date,
       end: r.end_date,
       backgroundColor: "#22c55e33",
-      borderColor: "#22c55e"
+      borderColor: "#22c55e",
+      extendedProps: { rate: r }
     }));
   }, [rates]);
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 20 }}>
-      <h1>Caravan Dashboard</h1>
+      <h1>Pricing Manager</h1>
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-        <button onClick={() => setMode("bookings")}>
-          Bookings mode
-        </button>
-        <button onClick={() => setMode("pricing")}>
-          Pricing mode
-        </button>
-      </div>
-
-      <div style={{ padding: 12, border: "1px solid #eee", borderRadius: 12 }}>
-        <FullCalendar
-          plugins={[dayGridPlugin, interactionPlugin]}
-          selectable
-          select={onSelect}
-          initialView="dayGridMonth"
-          events={[...bookingEvents, ...rateEvents]}
-          height="auto"
-        />
-      </div>
-
-      <p style={{ marginTop: 10, opacity: 0.7 }}>
-        {mode === "pricing"
-          ? "Drag dates to set pricing"
-          : "Drag dates to create bookings"}
+      <p style={{ opacity: 0.7 }}>
+        Drag dates to add pricing • Click pricing to edit or delete
       </p>
+
+      <FullCalendar
+        plugins={[dayGridPlugin, interactionPlugin]}
+        selectable
+        select={onSelect}
+        eventClick={onEventClick}
+        initialView="dayGridMonth"
+        events={rateEvents}
+        height="auto"
+      />
     </div>
   );
 }
