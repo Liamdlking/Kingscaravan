@@ -61,6 +61,10 @@ function eachDay(startISO: string, endISO: string) {
   return out;
 }
 
+function fmtRange(start: string, end: string) {
+  return `${start} → ${end}`;
+}
+
 export default function Dashboard() {
   const [mode, setMode] = useState<"bookings" | "pricing">("bookings");
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -107,7 +111,7 @@ export default function Dashboard() {
       return;
     }
 
-    // Pricing mode
+    // Pricing mode - creates a draft rate block
     setEditor({
       type: "rate",
       rate: { id: "", start_date, end_date, price: 0, rate_type: "total", note: null },
@@ -203,6 +207,7 @@ export default function Dashboard() {
 
     setEditor({ ...editor, saving: true, err: "" });
 
+    // If editing an existing rate, delete it and re-insert (simple + reliable)
     if (editor.rate.id) {
       await fetch(`/api/rates?id=${encodeURIComponent(editor.rate.id)}`, { method: "DELETE" });
     }
@@ -307,6 +312,12 @@ export default function Dashboard() {
     return [...rateEvents, ...bookingEvents];
   }, [rates, bookings]);
 
+  const upcoming = useMemo(() => {
+    const copy = [...bookings];
+    copy.sort((a, b) => (a.start_date > b.start_date ? 1 : -1));
+    return copy;
+  }, [bookings]);
+
   return (
     <div style={styles.page}>
       <style>{`
@@ -373,27 +384,96 @@ export default function Dashboard() {
       </div>
 
       <div style={styles.layout}>
-        <div style={styles.card}>
-          {loading ? (
-            <div style={{ padding: 18 }}>Loading…</div>
-          ) : (
-            <FullCalendar
-              plugins={[dayGridPlugin, interactionPlugin]}
-              initialView="dayGridMonth"
-              selectable
-              selectMirror
-              unselectAuto
-              select={onSelect}
-              eventClick={onEventClick}
-              events={events}
-              height="auto"
-              dayCellClassNames={dayCellClassNames}
-            />
-          )}
+        <div style={{ display: "grid", gap: 14 }}>
+          <div style={styles.card}>
+            {loading ? (
+              <div style={{ padding: 18 }}>Loading…</div>
+            ) : (
+              <FullCalendar
+                plugins={[dayGridPlugin, interactionPlugin]}
+                initialView="dayGridMonth"
+                selectable
+                selectMirror
+                unselectAuto
+                select={onSelect}
+                eventClick={onEventClick}
+                events={events}
+                height="auto"
+                dayCellClassNames={dayCellClassNames}
+              />
+            )}
+          </div>
+
+          {/* ✅ QUICK VIEW LIST */}
+          <div style={styles.card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <h2 style={{ margin: 0, fontSize: 16 }}>Bookings (quick view)</h2>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>{upcoming.length} total</div>
+            </div>
+
+            {upcoming.length === 0 ? (
+              <div style={{ marginTop: 10, opacity: 0.75 }}>No bookings yet.</div>
+            ) : (
+              <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                {upcoming.map((b) => {
+                  const status = (b.status ?? "confirmed") as "confirmed" | "provisional";
+                  const pill =
+                    status === "confirmed"
+                      ? { bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.35)", text: "#b91c1c", label: "Confirmed" }
+                      : { bg: "rgba(245,158,11,0.14)", border: "rgba(245,158,11,0.4)", text: "#92400e", label: "Provisional" };
+
+                  return (
+                    <button
+                      key={b.id}
+                      onClick={() => setEditor({ type: "booking", booking: b, draft: { ...b } })}
+                      style={{
+                        textAlign: "left",
+                        width: "100%",
+                        border: "1px solid #eee",
+                        background: "white",
+                        borderRadius: 12,
+                        padding: 12,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                        <div>
+                          <div style={{ fontWeight: 900, marginBottom: 2 }}>{b.guest_name || "Booking"}</div>
+                          <div style={{ fontSize: 13, opacity: 0.75 }}>{fmtRange(b.start_date, b.end_date)}</div>
+                        </div>
+
+                        <div
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 800,
+                            padding: "6px 10px",
+                            borderRadius: 999,
+                            border: `1px solid ${pill.border}`,
+                            background: pill.bg,
+                            color: pill.text,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {pill.label}
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, opacity: 0.8 }}>
+                        {typeof b.guests_count === "number" && <span>👤 Guests: {b.guests_count}</span>}
+                        {typeof b.dogs_count === "number" && <span>🐶 Dogs: {b.dogs_count}</span>}
+                        {b.phone && <span>📞 {b.phone}</span>}
+                        {b.guest_email && <span>✉️ {b.guest_email}</span>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         <div style={styles.sideCard}>
-          <div style={{ fontWeight: 800, marginBottom: 10 }}>
+          <div style={{ fontWeight: 900, marginBottom: 10 }}>
             {editor?.type === "rate" ? "Price editor" : "Booking editor"}
           </div>
 
