@@ -115,7 +115,8 @@ export default function AvailabilityPage() {
   }, [bookings]);
 
   const dayCellClassNames = (info: any) => {
-    const d = isoLocal(info.date);
+    // IMPORTANT: use UTC date string from FullCalendar to avoid timezone drift
+    const d = info.date.toISOString().slice(0, 10);
     const classes: string[] = [];
 
     if (markers.confirmedFull.has(d)) classes.push("day-confirmed");
@@ -145,7 +146,6 @@ export default function AvailabilityPage() {
   };
 
   function hasConfirmedInRange(startISO: string, checkoutISO: string) {
-    // nights are [start, checkout) but checkout is NOT booked — ok to exclude
     const days = eachDay(startISO, checkoutISO);
     return days.some((d) => markers.confirmedFull.has(d));
   }
@@ -155,7 +155,8 @@ export default function AvailabilityPage() {
 
     const start = isoLocal(sel.start);
 
-    // ✅ last highlighted day should be checkout day
+    // ✅ last highlighted day should be checkout day:
+    // FullCalendar selection end is exclusive, so we convert it to an inclusive "checkout highlight"
     const checkout = addDaysISO(isoLocal(sel.end), -1);
 
     const n = nightsCount(start, checkout);
@@ -194,9 +195,10 @@ export default function AvailabilityPage() {
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 18 }}>
       <style>{`
-        .day-available { background: rgba(34,197,94,0.10); }
-        .day-confirmed { background: rgba(239,68,68,0.12); }
-        .day-provisional { background: rgba(245,158,11,0.14); }
+        /* Base day colouring must be applied to the FRAME */
+        .fc .fc-daygrid-day.day-available .fc-daygrid-day-frame { background: rgba(34,197,94,0.10); }
+        .fc .fc-daygrid-day.day-confirmed .fc-daygrid-day-frame { background: rgba(239,68,68,0.12); }
+        .fc .fc-daygrid-day.day-provisional .fc-daygrid-day-frame { background: rgba(245,158,11,0.14); }
 
         .fc .fc-daygrid-day-frame {
           border-radius: 10px;
@@ -204,11 +206,13 @@ export default function AvailabilityPage() {
           position: relative;
         }
 
-        .fc .fc-daygrid-day-frame::before {
+        /* Half overlay layer */
+        .fc .fc-daygrid-day-frame::after {
           content: "";
           position: absolute;
           inset: 0;
           pointer-events: none;
+          border-radius: 10px;
           background: linear-gradient(
             90deg,
             var(--leftOverlay, transparent) 0%,
@@ -218,18 +222,23 @@ export default function AvailabilityPage() {
           );
         }
 
-        .out-confirmed { --leftOverlay: rgba(239,68,68,0.26); }
-        .in-confirmed { --rightOverlay: rgba(239,68,68,0.26); }
+        /* Set overlay vars on the DAY CELL so they inherit */
+        .fc .fc-daygrid-day.out-confirmed { --leftOverlay: rgba(239,68,68,0.26); }
+        .fc .fc-daygrid-day.in-confirmed  { --rightOverlay: rgba(239,68,68,0.26); }
 
-        .out-provisional { --leftOverlay: rgba(245,158,11,0.28); }
-        .in-provisional { --rightOverlay: rgba(245,158,11,0.28); }
+        .fc .fc-daygrid-day.out-provisional { --leftOverlay: rgba(245,158,11,0.28); }
+        .fc .fc-daygrid-day.in-provisional  { --rightOverlay: rgba(245,158,11,0.28); }
+
+        /* Keep text above overlay */
+        .fc .fc-daygrid-day-top,
+        .fc .fc-daygrid-day-events { position: relative; z-index: 1; }
       `}</style>
 
       <h1 style={{ margin: "0 0 6px" }}>Availability</h1>
       <p style={{ margin: "0 0 12px", opacity: 0.75 }}>
         Drag to include your checkout day (e.g. drag <b>Mon–Fri</b> for a <b>Friday checkout</b>).
         <br />
-        🟢 Available • 🟠 Provisional • 🔴 Booked — with half highlights for check-in/out days.
+        🟢 Available • 🟠 Provisional • 🔴 Booked — half highlights show check-in/out days.
       </p>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 14 }}>
