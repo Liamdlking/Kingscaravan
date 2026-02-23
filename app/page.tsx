@@ -10,8 +10,10 @@ type Booking = {
   id: string;
   start_date: string;
   end_date: string;
-  guest_name: string;
+  guest_name: string | null;
+  contact?: string | null;
   notes?: string | null;
+  status?: "provisional" | "confirmed" | null;
 };
 
 type Rate = {
@@ -20,150 +22,573 @@ type Rate = {
   end_date: string;
   price: number;
   rate_type: "nightly" | "total";
+  note?: string | null;
 };
 
 type Editor =
-  | { type: "booking"; booking: Booking }
-  | { type: "rate"; rate: Rate }
+  | { type: "booking"; booking: Booking; draft: Partial<Booking>; saving?: boolean; err?: string }
+  | { type: "rate"; rate: Rate; draft: Partial<Rate>; saving?: boolean; err?: string }
   | null;
 
 function iso(d: Date) {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 export default function Dashboard() {
+  const [mode, setMode] = useState<"bookings" | "pricing">("bookings");
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [rates, setRates] = useState<Rate[]>([]);
-  const [mode, setMode] = useState<"bookings" | "pricing">("bookings");
+  const [loading, setLoading] = useState(true);
   const [editor, setEditor] = useState<Editor>(null);
 
-  async function load() {
-    const b = await fetch("/api/bookings").then(r => r.json());
-    const r = await fetch("/api/rates").then(r => r.json());
-    setBookings(b.bookings ?? []);
-    setRates(r.rates ?? []);
+  async function loadAll() {
+    setLoading(true);
+    const [bRes, rRes] = await Promise.all([fetch("/api/bookings"), fetch("/api/rates")]);
+    const [bJson, rJson] = await Promise.all([bRes.json(), rRes.json()]);
+    setBookings(bJson.bookings ?? []);
+    setRates(rJson.rates ?? []);
+    setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    loadAll();
+  }, []);
 
   async function onSelect(sel: DateSelectArg) {
-    const start = iso(sel.start);
-    const end = iso(sel.end);
+    const start_date = iso(sel.start);
+    const end_date = iso(sel.end);
 
-    if (mode === "pricing") {
-      const res = await fetch("/api/rates", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ start_date: start, end_date: end, price: 0, rate_type: "total" })
-      });
-      const json = await res.json();
-      setEditor({ type: "rate", rate: json.rate });
-      await load();
-    } else {
+    // BOOKINGS MODE: create booking then open editor
+    if (mode === "bookings") {
       const res = await fetch("/api/bookings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ start_date: start, end_date: end, guest_name: "New booking" })
+        body: JSON.stringify({
+          start_date,
+          end_date,
+          guest_name: "New booking",
+          contact: "",
+          notes: "",
+          status: "confirmed",
+        }),
       });
+
       const json = await res.json();
-      setEditor({ type: "booking", booking: json.booking });
-      await load();
+      if (!res.ok) {
+        alert(json?.error || "Could not create booking");
+        return;
+      }
+
+      await loadAll();
+
+      const created: Booking | undefined = json.booking;
+      if (created?.id) {
+        setEditor({
+          type: "booking",
+          booking: created,
+          draft: {
+            guest_name: created.guest_name ?? "",
+            contact: created.contact ?? "",
+            notes: created.notes ?? "",
+            status: (created.status ?? "confirmed") as any,
+          },
+        });
+      }
+      return;
     }
+
+    // PRICING MODE: create a *draft* rate WITHOUT assuming API returns json.rate
+    // (avoids the client-side crash you saw)
+    setEditor({
+      type: "rate",
+      rate: {
+        id: "",
+        start_date,
+        end_date,
+        price: 0,
+        rate_type: "total",
+        note: null,
+      },
+      draft: {
+        start_date,
+        end_date,
+        price: 0,
+        rate_type: "total",
+        note: "",
+      },
+    });
   }
 
   function onEventClick(arg: EventClickArg) {
     const ext = arg.event.extendedProps as any;
-    if (ext.rate) setEditor({ type: "rate", rate: ext.rate });
-    if (ext.booking) setEditor({ type: "booking", booking: ext.booking });
+
+    if (ext.kind === "booking") {
+      const b: Booking = ext.booking;
+      setEditor({
+        type: "booking",
+        booking: b,
+        draft: {
+          guest_name: b.guest_name ?? "",
+          contact: b.contact ?? "",
+          notes: b.notes ?? "",
+          status: (b.status ?? "confirmed") as any,
+        },
+      });
+      return;
+    }
+
+    if (ext.kind === "rate") {
+      const r: Rate = ext.rate;
+      setEditor({
+        type: "rate",
+        rate: r,
+        draft: {
+          price: r.price,
+          rate_type: r.rate_type,
+          note: r.note ?? "",
+        },
+      });
+      return;
+    }
   }
 
-  async function deleteRate(id: string) {
-    await fetch(`/api/rates?id=${id}`, { method: "DELETE" });
+  async function saveBooking() {
+    if (!editor || editor.type !== "booking") return;
+    setEditor({ ...editor, saving: true, err: "" });
+
+    const payload = {
+      id: editor.booking.id,
+      guest_name: editor.draft.guest_name ?? "",
+      contact: editor.draft.contact ?? "",
+      notes: editor.draft.notes ?? "",
+      status: editor.draft.status ?? "confirmed",
+    };
+
+    const res = await fetch("/api/bookings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      setEditor({ ...editor, saving: false, err: json?.error || "Could not save booking" });
+      return;
+    }
+
     setEditor(null);
-    await load();
+    await loadAll();
   }
 
   async function deleteBooking(id: string) {
-    await fetch(`/api/bookings?id=${id}`, { method: "DELETE" });
+    if (!confirm("Delete this booking?")) return;
+    await fetch(`/api/bookings?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     setEditor(null);
-    await load();
+    await loadAll();
   }
 
-  const events = useMemo(() => [
-    ...rates.map(r => ({
-      title: `£${r.price}`,
+  // Rates: save by either INSERT (new) or delete+insert (edit) depending on if id exists
+  async function saveRate() {
+    if (!editor || editor.type !== "rate") return;
+    setEditor({ ...editor, saving: true, err: "" });
+
+    const start_date = (editor.rate.start_date || editor.draft.start_date) as string;
+    const end_date = (editor.rate.end_date || editor.draft.end_date) as string;
+
+    const price = Number(editor.draft.price ?? 0);
+    if (!Number.isFinite(price) || price < 0) {
+      setEditor({ ...editor, saving: false, err: "Please enter a valid price." });
+      return;
+    }
+
+    const rate_type = (editor.draft.rate_type ?? "total") as "nightly" | "total";
+    const note = (editor.draft.note ?? "") as string;
+
+    // If editing an existing rate, remove it first (simple, reliable)
+    if (editor.rate.id) {
+      await fetch(`/api/rates?id=${encodeURIComponent(editor.rate.id)}`, { method: "DELETE" });
+    }
+
+    const res = await fetch("/api/rates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ start_date, end_date, price, rate_type, note: note || null }),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      setEditor({ ...editor, saving: false, err: json?.error || "Could not save rate" });
+      return;
+    }
+
+    setEditor(null);
+    await loadAll();
+  }
+
+  async function deleteRate(id: string) {
+    if (!confirm("Delete this price block?")) return;
+    await fetch(`/api/rates?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    setEditor(null);
+    await loadAll();
+  }
+
+  const events = useMemo(() => {
+    const rateEvents = rates.map((r) => ({
+      id: `rate-${r.id}`,
+      title: r.rate_type === "nightly" ? `£${r.price}/n` : `£${r.price}`,
       start: r.start_date,
       end: r.end_date,
-      backgroundColor: "#22c55e33",
-      borderColor: "#22c55e",
-      extendedProps: { rate: r }
-    })),
-    ...bookings.map(b => ({
-      title: b.guest_name,
-      start: b.start_date,
-      end: b.end_date,
-      backgroundColor: "#ef444433",
-      borderColor: "#ef4444",
-      extendedProps: { booking: b }
-    }))
-  ], [rates, bookings]);
+      backgroundColor: "rgba(34,197,94,0.18)",
+      borderColor: "rgba(34,197,94,0.55)",
+      textColor: "#0f5132",
+      extendedProps: { kind: "rate", rate: r },
+    }));
+
+    const bookingEvents = bookings.map((b) => {
+      const status = (b.status ?? "confirmed") as "confirmed" | "provisional";
+      const color = status === "confirmed" ? "#ef4444" : "#f59e0b";
+
+      return {
+        id: `booking-${b.id}`,
+        title: b.guest_name ?? "Booking",
+        start: b.start_date,
+        end: b.end_date,
+        backgroundColor: color,
+        borderColor: color,
+        textColor: "#111",
+        extendedProps: { kind: "booking", booking: b },
+      };
+    });
+
+    return [...rateEvents, ...bookingEvents];
+  }, [rates, bookings]);
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 16, padding: 20 }}>
-      <div>
-        <h1>Caravan Dashboard</h1>
-
-        <div style={{ marginBottom: 10 }}>
-          <button onClick={() => setMode("bookings")}>Bookings</button>
-          <button onClick={() => setMode("pricing")} style={{ marginLeft: 8 }}>Pricing</button>
+    <div style={styles.page}>
+      <div style={styles.header}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 22 }}>Caravan Dashboard</h1>
+          <div style={{ opacity: 0.75, marginTop: 6 }}>
+            {mode === "bookings"
+              ? "Bookings mode: drag to add booking, click to edit."
+              : "Pricing mode: drag to add pricing block, click to edit."}
+          </div>
         </div>
 
-        <FullCalendar
-          plugins={[dayGridPlugin, interactionPlugin]}
-          selectable
-          select={onSelect}
-          eventClick={onEventClick}
-          events={events}
-          initialView="dayGridMonth"
-          height="auto"
-        />
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={() => setMode("bookings")}
+            style={{ ...styles.tab, ...(mode === "bookings" ? styles.tabOn : {}) }}
+          >
+            Bookings
+          </button>
+          <button
+            onClick={() => setMode("pricing")}
+            style={{ ...styles.tab, ...(mode === "pricing" ? styles.tabOn : {}) }}
+          >
+            Pricing
+          </button>
+          <button onClick={loadAll} style={styles.tab}>
+            Refresh
+          </button>
+        </div>
       </div>
 
-      <div style={{ borderLeft: "1px solid #eee", paddingLeft: 16 }}>
-        <h2>Editor</h2>
-
-        {!editor && <p>Select something to edit</p>}
-
-        {editor?.type === "rate" && (
-          <>
-            <p>Price</p>
-            <input
-              value={editor.rate.price}
-              onChange={e =>
-                setEditor({
-                  ...editor,
-                  rate: { ...editor.rate, price: Number(e.target.value) }
-                })
-              }
+      <div style={styles.layout}>
+        <div style={styles.card}>
+          {loading ? (
+            <div style={{ padding: 18 }}>Loading…</div>
+          ) : (
+            <FullCalendar
+              plugins={[dayGridPlugin, interactionPlugin]}
+              initialView="dayGridMonth"
+              selectable
+              selectMirror
+              unselectAuto
+              select={onSelect}
+              eventClick={onEventClick}
+              events={events}
+              height="auto"
             />
+          )}
+        </div>
 
-            <button onClick={() => deleteRate(editor.rate.id)} style={{ marginTop: 10 }}>
-              Delete rate
-            </button>
-          </>
-        )}
+        <div style={styles.sidebar}>
+          <div style={styles.sideCard}>
+            <div style={{ fontWeight: 800, marginBottom: 10 }}>Editor</div>
 
-        {editor?.type === "booking" && (
-          <>
-            <p>Guest</p>
-            <input value={editor.booking.guest_name} readOnly />
+            {!editor && (
+              <div style={{ opacity: 0.75 }}>
+                Click a booking or price block to edit.
+                <div style={{ marginTop: 10, fontSize: 12 }}>
+                  Tip: switch mode to change what drag-select creates.
+                </div>
+              </div>
+            )}
 
-            <button onClick={() => deleteBooking(editor.booking.id)} style={{ marginTop: 10 }}>
-              Delete booking
-            </button>
-          </>
-        )}
+            {editor?.type === "booking" && (
+              <>
+                <div style={styles.row}>
+                  <label style={styles.label}>Guest name</label>
+                  <input
+                    style={styles.input}
+                    value={(editor.draft.guest_name ?? "") as string}
+                    onChange={(e) =>
+                      setEditor({
+                        ...editor,
+                        draft: { ...editor.draft, guest_name: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+
+                <div style={styles.row}>
+                  <label style={styles.label}>Contact</label>
+                  <input
+                    style={styles.input}
+                    value={(editor.draft.contact ?? "") as string}
+                    onChange={(e) =>
+                      setEditor({
+                        ...editor,
+                        draft: { ...editor.draft, contact: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+
+                <div style={styles.row}>
+                  <label style={styles.label}>Status</label>
+                  <select
+                    style={styles.input}
+                    value={(editor.draft.status ?? "confirmed") as any}
+                    onChange={(e) =>
+                      setEditor({
+                        ...editor,
+                        draft: { ...editor.draft, status: e.target.value as any },
+                      })
+                    }
+                  >
+                    <option value="confirmed">Confirmed</option>
+                    <option value="provisional">Provisional</option>
+                  </select>
+                </div>
+
+                <div style={styles.row}>
+                  <label style={styles.label}>Notes</label>
+                  <textarea
+                    style={{ ...styles.input, minHeight: 90, resize: "vertical" }}
+                    value={(editor.draft.notes ?? "") as string}
+                    onChange={(e) =>
+                      setEditor({
+                        ...editor,
+                        draft: { ...editor.draft, notes: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+
+                {editor.err && <div style={styles.err}>{editor.err}</div>}
+
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <button style={styles.primaryBtn} onClick={saveBooking} disabled={editor.saving}>
+                    {editor.saving ? "Saving…" : "Save booking"}
+                  </button>
+                  <button
+                    style={styles.dangerBtn}
+                    onClick={() => deleteBooking(editor.booking.id)}
+                    disabled={editor.saving}
+                  >
+                    Delete
+                  </button>
+                </div>
+
+                <div style={styles.mini}>
+                  Dates: {editor.booking.start_date} → {editor.booking.end_date}
+                </div>
+              </>
+            )}
+
+            {editor?.type === "rate" && (
+              <>
+                <div style={styles.row}>
+                  <label style={styles.label}>Price (£)</label>
+                  <input
+                    style={styles.input}
+                    type="number"
+                    min={0}
+                    value={Number(editor.draft.price ?? 0)}
+                    onChange={(e) =>
+                      setEditor({
+                        ...editor,
+                        draft: { ...editor.draft, price: Number(e.target.value) },
+                      })
+                    }
+                  />
+                </div>
+
+                <div style={styles.row}>
+                  <label style={styles.label}>Type</label>
+                  <select
+                    style={styles.input}
+                    value={(editor.draft.rate_type ?? "total") as any}
+                    onChange={(e) =>
+                      setEditor({
+                        ...editor,
+                        draft: { ...editor.draft, rate_type: e.target.value as any },
+                      })
+                    }
+                  >
+                    <option value="total">Total price</option>
+                    <option value="nightly">Nightly rate</option>
+                  </select>
+                </div>
+
+                <div style={styles.row}>
+                  <label style={styles.label}>Note (optional)</label>
+                  <input
+                    style={styles.input}
+                    value={(editor.draft.note ?? "") as string}
+                    onChange={(e) =>
+                      setEditor({
+                        ...editor,
+                        draft: { ...editor.draft, note: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+
+                {editor.err && <div style={styles.err}>{editor.err}</div>}
+
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <button style={styles.primaryBtn} onClick={saveRate} disabled={editor.saving}>
+                    {editor.saving ? "Saving…" : "Save price"}
+                  </button>
+
+                  {editor.rate.id ? (
+                    <button
+                      style={styles.dangerBtn}
+                      onClick={() => deleteRate(editor.rate.id)}
+                      disabled={editor.saving}
+                    >
+                      Delete
+                    </button>
+                  ) : (
+                    <button style={styles.subBtn} onClick={() => setEditor(null)} disabled={editor.saving}>
+                      Cancel
+                    </button>
+                  )}
+                </div>
+
+                <div style={styles.mini}>
+                  Dates: {(editor.rate.start_date || editor.draft.start_date) as string} →{" "}
+                  {(editor.rate.end_date || editor.draft.end_date) as string}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
+            Tip: pricing blocks are green. bookings are red/amber.
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    padding: 18,
+    maxWidth: 1200,
+    margin: "0 auto",
+    fontFamily:
+      "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji",
+  },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    marginBottom: 12,
+  },
+  layout: {
+    display: "grid",
+    gridTemplateColumns: "1fr 360px",
+    gap: 14,
+  },
+  card: {
+    background: "white",
+    border: "1px solid #e6e6e6",
+    borderRadius: 14,
+    padding: 12,
+  },
+  sidebar: {},
+  sideCard: {
+    background: "white",
+    border: "1px solid #e6e6e6",
+    borderRadius: 14,
+    padding: 14,
+  },
+  tab: {
+    padding: "10px 12px",
+    borderRadius: 10,
+    border: "1px solid #ddd",
+    background: "white",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  tabOn: {
+    background: "#111",
+    color: "white",
+    borderColor: "#111",
+  },
+  row: { display: "grid", gap: 6, marginTop: 10 },
+  label: { fontSize: 12, opacity: 0.75 },
+  input: {
+    padding: "10px 12px",
+    borderRadius: 10,
+    border: "1px solid #ddd",
+    fontSize: 14,
+    outline: "none",
+  },
+  primaryBtn: {
+    padding: "11px 12px",
+    borderRadius: 12,
+    border: "1px solid #111",
+    background: "#111",
+    color: "white",
+    cursor: "pointer",
+    fontWeight: 800,
+    flex: 1,
+  },
+  dangerBtn: {
+    padding: "11px 12px",
+    borderRadius: 12,
+    border: "1px solid #ef4444",
+    background: "white",
+    color: "#ef4444",
+    cursor: "pointer",
+    fontWeight: 800,
+  },
+  subBtn: {
+    padding: "11px 12px",
+    borderRadius: 12,
+    border: "1px solid #ddd",
+    background: "white",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  err: {
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 10,
+    border: "1px solid #ffd0d0",
+    background: "#fff3f3",
+    color: "#b91c1c",
+    fontWeight: 700,
+  },
+  mini: { marginTop: 10, fontSize: 12, opacity: 0.7 },
+};
