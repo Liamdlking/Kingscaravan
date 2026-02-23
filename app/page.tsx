@@ -9,7 +9,7 @@ import type { DateSelectArg, EventClickArg } from "@fullcalendar/core";
 type Booking = {
   id: string;
   start_date: string;
-  end_date: string; // exclusive
+  end_date: string; // checkout day (NOT booked)
   status?: "provisional" | "confirmed" | null;
 
   guest_name: string | null;
@@ -43,7 +43,7 @@ type Editor =
   | { type: "rate"; rate: Rate; draft: Partial<Rate>; saving?: boolean; err?: string }
   | null;
 
-function iso(d: Date) {
+function isoLocal(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
@@ -71,11 +71,11 @@ export default function Dashboard() {
   }, []);
 
   async function onSelect(sel: DateSelectArg) {
-    const start_date = iso(sel.start);
-    const end_date = iso(sel.end);
+    const start_date = isoLocal(sel.start);
+    const end_date = isoLocal(sel.end); // end-exclusive selection from FullCalendar (fine for owner-side blocks)
 
     if (mode === "bookings") {
-      // create a quick booking placeholder then allow edit
+      // Create a placeholder booking then open it
       const res = await fetch("/api/bookings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -92,20 +92,17 @@ export default function Dashboard() {
         return;
       }
       await loadAll();
-
       const created: Booking | undefined = json.booking;
-      if (created?.id) {
-        setEditor({
-          type: "booking",
-          booking: created,
-          draft: { ...created },
-        });
-      }
+      if (created?.id) setEditor({ type: "booking", booking: created, draft: { ...created } });
       return;
     }
 
-    // pricing mode handled elsewhere in your project (kept simple here)
-    alert("Pricing mode: click a price block to edit, or use your pricing page.");
+    // PRICING MODE: create a draft rate editor (saved when you click Save)
+    setEditor({
+      type: "rate",
+      rate: { id: "", start_date, end_date, price: 0, rate_type: "total", note: null },
+      draft: { start_date, end_date, price: 0, rate_type: "total", note: "" },
+    });
   }
 
   function onEventClick(arg: EventClickArg) {
@@ -116,6 +113,7 @@ export default function Dashboard() {
       setEditor({ type: "booking", booking: b, draft: { ...b } });
       return;
     }
+
     if (ext.kind === "rate") {
       const r: Rate = ext.rate;
       setEditor({ type: "rate", rate: r, draft: { ...r } });
@@ -125,11 +123,8 @@ export default function Dashboard() {
 
   async function saveBooking() {
     if (!editor || editor.type !== "booking") return;
-
     const d = editor.draft;
-    if (!editor.booking.id) return;
 
-    // basic validation
     if (!String(d.guest_name ?? "").trim()) {
       setEditor({ ...editor, err: "Guest name is required." });
       return;
@@ -137,32 +132,30 @@ export default function Dashboard() {
 
     setEditor({ ...editor, saving: true, err: "" });
 
-    const payload = {
-      id: editor.booking.id,
-
-      start_date: d.start_date,
-      end_date: d.end_date,
-      status: d.status ?? "provisional",
-
-      guest_name: d.guest_name,
-      guest_email: d.guest_email,
-      phone: d.phone,
-
-      contact: d.contact,
-      notes: d.notes,
-
-      guests_count: d.guests_count,
-      children_count: d.children_count,
-      dogs_count: d.dogs_count,
-
-      vehicle_reg: d.vehicle_reg,
-      special_requests: d.special_requests,
-    };
-
     const res = await fetch("/api/bookings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        id: editor.booking.id,
+
+        start_date: d.start_date,
+        end_date: d.end_date,
+        status: d.status ?? "provisional",
+
+        guest_name: d.guest_name,
+        guest_email: d.guest_email,
+        phone: d.phone,
+
+        contact: d.contact,
+        notes: d.notes,
+
+        guests_count: d.guests_count,
+        children_count: d.children_count,
+        dogs_count: d.dogs_count,
+
+        vehicle_reg: d.vehicle_reg,
+        special_requests: d.special_requests,
+      }),
     });
 
     const json = await res.json();
@@ -182,7 +175,66 @@ export default function Dashboard() {
     await loadAll();
   }
 
+  async function saveRate() {
+    if (!editor || editor.type !== "rate") return;
+
+    const start_date = String(editor.draft.start_date ?? editor.rate.start_date ?? "");
+    const end_date = String(editor.draft.end_date ?? editor.rate.end_date ?? "");
+    const price = Number(editor.draft.price ?? 0);
+    const rate_type = (editor.draft.rate_type ?? "total") as "nightly" | "total";
+    const note = String(editor.draft.note ?? "");
+
+    if (!start_date || !end_date) {
+      setEditor({ ...editor, err: "Start and end dates are required." });
+      return;
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      setEditor({ ...editor, err: "Enter a valid price." });
+      return;
+    }
+
+    setEditor({ ...editor, saving: true, err: "" });
+
+    // If editing an existing rate: delete then insert (simple + reliable)
+    if (editor.rate.id) {
+      await fetch(`/api/rates?id=${encodeURIComponent(editor.rate.id)}`, { method: "DELETE" });
+    }
+
+    const res = await fetch("/api/rates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ start_date, end_date, price, rate_type, note: note || null }),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      setEditor({ ...editor, saving: false, err: json?.error || "Could not save rate" });
+      return;
+    }
+
+    setEditor(null);
+    await loadAll();
+  }
+
+  async function deleteRate(id: string) {
+    if (!confirm("Delete this price block?")) return;
+    await fetch(`/api/rates?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    setEditor(null);
+    await loadAll();
+  }
+
   const events = useMemo(() => {
+    const rateEvents = rates.map((r) => ({
+      id: `rate-${r.id}`,
+      title: r.rate_type === "nightly" ? `£${r.price}/night` : `£${r.price} total`,
+      start: r.start_date,
+      end: r.end_date,
+      backgroundColor: "rgba(34,197,94,0.18)",
+      borderColor: "rgba(34,197,94,0.55)",
+      textColor: "#0f5132",
+      extendedProps: { kind: "rate", rate: r },
+    }));
+
     const bookingEvents = bookings.map((b) => {
       const status = (b.status ?? "confirmed") as "confirmed" | "provisional";
       const color = status === "confirmed" ? "#ef4444" : "#f59e0b";
@@ -198,26 +250,19 @@ export default function Dashboard() {
       };
     });
 
-    const rateEvents = rates.map((r) => ({
-      id: `rate-${r.id}`,
-      title: r.rate_type === "nightly" ? `£${r.price}/n` : `£${r.price}`,
-      start: r.start_date,
-      end: r.end_date,
-      backgroundColor: "rgba(34,197,94,0.18)",
-      borderColor: "rgba(34,197,94,0.55)",
-      textColor: "#0f5132",
-      extendedProps: { kind: "rate", rate: r },
-    }));
-
     return [...rateEvents, ...bookingEvents];
-  }, [bookings, rates]);
+  }, [rates, bookings]);
 
   return (
     <div style={styles.page}>
       <div style={styles.header}>
         <div>
           <h1 style={{ margin: 0, fontSize: 22 }}>Caravan Dashboard</h1>
-          <div style={{ opacity: 0.75, marginTop: 6 }}>Click a booking to view/edit all details.</div>
+          <div style={{ opacity: 0.75, marginTop: 6 }}>
+            {mode === "bookings"
+              ? "Bookings mode: drag to add booking • click to edit."
+              : "Pricing mode: drag to add price block • click price to edit/delete."}
+          </div>
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
@@ -243,6 +288,7 @@ export default function Dashboard() {
               initialView="dayGridMonth"
               selectable
               selectMirror
+              unselectAuto
               select={onSelect}
               eventClick={onEventClick}
               events={events}
@@ -252,13 +298,82 @@ export default function Dashboard() {
         </div>
 
         <div style={styles.sideCard}>
-          <div style={{ fontWeight: 800, marginBottom: 10 }}>Booking details</div>
+          <div style={{ fontWeight: 800, marginBottom: 10 }}>
+            {editor?.type === "rate" ? "Price editor" : "Booking editor"}
+          </div>
 
-          {!editor || editor.type !== "booking" ? (
-            <div style={{ opacity: 0.75, fontSize: 13 }}>
-              Click a booking on the calendar to view the full information.
-            </div>
-          ) : (
+          {!editor && <div style={{ opacity: 0.75, fontSize: 13 }}>Click a booking or price block to edit it.</div>}
+
+          {editor?.type === "rate" && (
+            <>
+              <Field label="Start date">
+                <input
+                  style={styles.input}
+                  type="date"
+                  value={String(editor.draft.start_date ?? editor.rate.start_date ?? "")}
+                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, start_date: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="End date (exclusive)">
+                <input
+                  style={styles.input}
+                  type="date"
+                  value={String(editor.draft.end_date ?? editor.rate.end_date ?? "")}
+                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, end_date: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="Rate type">
+                <select
+                  style={styles.input}
+                  value={String(editor.draft.rate_type ?? editor.rate.rate_type ?? "total")}
+                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, rate_type: e.target.value as any } })}
+                >
+                  <option value="total">Total</option>
+                  <option value="nightly">Nightly</option>
+                </select>
+              </Field>
+
+              <Field label="Price (£)">
+                <input
+                  style={styles.input}
+                  type="number"
+                  min={0}
+                  value={Number(editor.draft.price ?? editor.rate.price ?? 0)}
+                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, price: Number(e.target.value) } })}
+                />
+              </Field>
+
+              <Field label="Note (optional)">
+                <input
+                  style={styles.input}
+                  value={String(editor.draft.note ?? editor.rate.note ?? "")}
+                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, note: e.target.value } })}
+                />
+              </Field>
+
+              {editor.err && <div style={styles.err}>{editor.err}</div>}
+
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <button style={styles.primaryBtn} onClick={saveRate} disabled={editor.saving}>
+                  {editor.saving ? "Saving…" : "Save price"}
+                </button>
+
+                {editor.rate.id ? (
+                  <button style={styles.dangerBtn} onClick={() => deleteRate(editor.rate.id)} disabled={editor.saving}>
+                    Delete
+                  </button>
+                ) : (
+                  <button style={styles.subBtn} onClick={() => setEditor(null)} disabled={editor.saving}>
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+
+          {editor?.type === "booking" && (
             <>
               <div style={styles.grid2}>
                 <Field label="Arrival">
@@ -269,7 +384,7 @@ export default function Dashboard() {
                     onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, start_date: e.target.value } })}
                   />
                 </Field>
-                <Field label="Departure (checkout)">
+                <Field label="Checkout">
                   <input
                     style={styles.input}
                     type="date"
@@ -301,7 +416,7 @@ export default function Dashboard() {
               </Field>
 
               <div style={styles.grid2}>
-                <Field label="Guest email">
+                <Field label="Email">
                   <input
                     style={styles.input}
                     value={String(editor.draft.guest_email ?? "")}
@@ -325,9 +440,7 @@ export default function Dashboard() {
                     min={1}
                     max={8}
                     value={Number(editor.draft.guests_count ?? 0)}
-                    onChange={(e) =>
-                      setEditor({ ...editor, draft: { ...editor.draft, guests_count: Number(e.target.value) } })
-                    }
+                    onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, guests_count: Number(e.target.value) } })}
                   />
                 </Field>
                 <Field label="Children">
@@ -352,12 +465,10 @@ export default function Dashboard() {
                     min={0}
                     max={5}
                     value={Number(editor.draft.dogs_count ?? 0)}
-                    onChange={(e) =>
-                      setEditor({ ...editor, draft: { ...editor.draft, dogs_count: Number(e.target.value) } })
-                    }
+                    onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, dogs_count: Number(e.target.value) } })}
                   />
                 </Field>
-                <Field label="Vehicle registration">
+                <Field label="Vehicle reg">
                   <input
                     style={styles.input}
                     value={String(editor.draft.vehicle_reg ?? "")}
@@ -376,7 +487,7 @@ export default function Dashboard() {
                 />
               </Field>
 
-              <Field label="Owner notes (optional)">
+              <Field label="Owner notes">
                 <textarea
                   style={{ ...styles.input, minHeight: 70, resize: "vertical" }}
                   value={String(editor.draft.notes ?? "")}
@@ -490,6 +601,14 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #ef4444",
     background: "white",
     color: "#ef4444",
+    cursor: "pointer",
+    fontWeight: 800,
+  },
+  subBtn: {
+    padding: "11px 12px",
+    borderRadius: 12,
+    border: "1px solid #ddd",
+    background: "white",
     cursor: "pointer",
     fontWeight: 800,
   },
