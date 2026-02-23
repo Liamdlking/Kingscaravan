@@ -2,16 +2,16 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "../../../lib/supabaseServer";
 import { overlaps } from "../../../lib/overlap";
 
-type BookingRow = {
-  id: string;
-  start_date: string; // YYYY-MM-DD
-  end_date: string;   // YYYY-MM-DD (exclusive)
-  guest_name: string | null;
-  contact: string | null;
-  notes: string | null;
-  status?: string | null; // optional if your table has it
-  created_at: string;
-};
+function strOrNull(v: any) {
+  const s = typeof v === "string" ? v.trim() : String(v ?? "").trim();
+  return s ? s : null;
+}
+
+function numOrNull(v: any) {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
 export async function GET() {
   const supabase = supabaseServer();
@@ -30,16 +30,12 @@ export async function POST(req: Request) {
 
   const start_date = String(body.start_date || "");
   const end_date = String(body.end_date || "");
-  const guest_name = body.guest_name ?? null;
-  const contact = body.contact ?? null;
-  const notes = body.notes ?? null;
-  const status = body.status ?? null;
 
   if (!start_date || !end_date) {
     return NextResponse.json({ error: "start_date and end_date are required" }, { status: 400 });
   }
 
-  // Fetch existing bookings to check overlap
+  // overlap check
   const { data: existing, error: readErr } = await supabase
     .from("bookings")
     .select("id,start_date,end_date");
@@ -56,13 +52,28 @@ export async function POST(req: Request) {
     );
   }
 
-  const insertPayload: any = { start_date, end_date, guest_name, contact, notes };
-  // only include status if provided (and your table has the column)
-  if (status !== null && status !== undefined) insertPayload.status = status;
+  // ✅ Store EVERYTHING (public form + owner-created)
+  const payload: any = {
+    start_date,
+    end_date,
+    guest_name: strOrNull(body.guest_name),
+    contact: strOrNull(body.contact),
+    notes: strOrNull(body.notes),
+
+    status: strOrNull(body.status) ?? "provisional",
+
+    guest_email: strOrNull(body.guest_email),
+    phone: strOrNull(body.phone),
+    guests_count: numOrNull(body.guests_count),
+    children_count: numOrNull(body.children_count),
+    dogs_count: numOrNull(body.dogs_count),
+    vehicle_reg: strOrNull(body.vehicle_reg),
+    special_requests: strOrNull(body.special_requests),
+  };
 
   const { data, error } = await supabase
     .from("bookings")
-    .insert([insertPayload])
+    .insert([payload])
     .select("*")
     .single();
 
@@ -71,8 +82,8 @@ export async function POST(req: Request) {
 }
 
 /**
- * ✅ NEW: Update a booking (used by the sidebar editor)
- * Request body: { id, guest_name?, contact?, notes?, status? }
+ * ✅ Update any booking fields
+ * Body: { id, ...fieldsToUpdate }
  */
 export async function PATCH(req: Request) {
   const supabase = supabaseServer();
@@ -81,20 +92,71 @@ export async function PATCH(req: Request) {
   const id = String(body.id || "");
   if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
 
-  // Build update payload only from provided fields
-  const updatePayload: any = {};
-  if (body.guest_name !== undefined) updatePayload.guest_name = body.guest_name;
-  if (body.contact !== undefined) updatePayload.contact = body.contact;
-  if (body.notes !== undefined) updatePayload.notes = body.notes;
-  if (body.status !== undefined) updatePayload.status = body.status;
+  const update: any = {};
 
-  if (Object.keys(updatePayload).length === 0) {
+  // Only update fields that are provided
+  if (body.start_date !== undefined) update.start_date = String(body.start_date || "");
+  if (body.end_date !== undefined) update.end_date = String(body.end_date || "");
+
+  if (body.guest_name !== undefined) update.guest_name = strOrNull(body.guest_name);
+  if (body.guest_email !== undefined) update.guest_email = strOrNull(body.guest_email);
+  if (body.phone !== undefined) update.phone = strOrNull(body.phone);
+
+  if (body.contact !== undefined) update.contact = strOrNull(body.contact);
+  if (body.notes !== undefined) update.notes = strOrNull(body.notes);
+
+  if (body.guests_count !== undefined) update.guests_count = numOrNull(body.guests_count);
+  if (body.children_count !== undefined) update.children_count = numOrNull(body.children_count);
+  if (body.dogs_count !== undefined) update.dogs_count = numOrNull(body.dogs_count);
+
+  if (body.vehicle_reg !== undefined) update.vehicle_reg = strOrNull(body.vehicle_reg);
+  if (body.special_requests !== undefined) update.special_requests = strOrNull(body.special_requests);
+
+  if (body.status !== undefined) update.status = strOrNull(body.status);
+
+  if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "No fields provided to update" }, { status: 400 });
+  }
+
+  // If dates are changing, re-check overlap (excluding itself)
+  if (update.start_date || update.end_date) {
+    const { data: others, error: otherErr } = await supabase
+      .from("bookings")
+      .select("id,start_date,end_date")
+      .neq("id", id);
+
+    if (otherErr) return NextResponse.json({ error: otherErr.message }, { status: 500 });
+
+    const checkB = {
+      start_date: update.start_date ?? body._existing_start_date,
+      end_date: update.end_date ?? body._existing_end_date,
+    };
+
+    if (!checkB.start_date || !checkB.end_date) {
+      // If caller didn't send existing values, fetch them
+      const { data: cur, error: curErr } = await supabase
+        .from("bookings")
+        .select("start_date,end_date")
+        .eq("id", id)
+        .single();
+
+      if (curErr) return NextResponse.json({ error: curErr.message }, { status: 500 });
+      checkB.start_date = update.start_date ?? cur.start_date;
+      checkB.end_date = update.end_date ?? cur.end_date;
+    }
+
+    const conflict = (others ?? []).some((b: any) => overlaps(checkB as any, b as any));
+    if (conflict) {
+      return NextResponse.json(
+        { error: "Updated dates overlap an existing booking (same-day checkout/checkin is allowed)." },
+        { status: 409 }
+      );
+    }
   }
 
   const { data, error } = await supabase
     .from("bookings")
-    .update(updatePayload)
+    .update(update)
     .eq("id", id)
     .select("*")
     .single();
