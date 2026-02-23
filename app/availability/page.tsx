@@ -67,10 +67,7 @@ function isAllowedPattern(start: Date, end: Date) {
 function calcPrice(startISO: string, endISO: string, rates: Rate[]) {
   // If there's a TOTAL rate that exactly matches, use it
   const exactTotal = rates.find(
-    (r) =>
-      r.rate_type === "total" &&
-      r.start_date === startISO &&
-      r.end_date === endISO
+    (r) => r.rate_type === "total" && r.start_date === startISO && r.end_date === endISO
   );
   if (exactTotal) {
     return { ok: true as const, total: Number(exactTotal.price), method: "total" as const };
@@ -81,12 +78,7 @@ function calcPrice(startISO: string, endISO: string, rates: Rate[]) {
   let total = 0;
 
   for (const day of nights) {
-    const nightly = rates.find(
-      (r) =>
-        r.rate_type === "nightly" &&
-        r.start_date <= day &&
-        day < r.end_date
-    );
+    const nightly = rates.find((r) => r.rate_type === "nightly" && r.start_date <= day && day < r.end_date);
     if (!nightly) return { ok: false as const, total: null as any, method: "missing" as const };
     total += Number(nightly.price);
   }
@@ -127,7 +119,7 @@ export default function AvailabilityPage() {
     return { confirmedDates: confirmed, provisionalDates: provisional };
   }, [bookings]);
 
-  // Add price overlays (optional display) as background events
+  // Add price overlays as background events (this was blocking drag-select before)
   const rateEvents = useMemo(() => {
     return rates.map((r) => ({
       id: `rate-${r.id}`,
@@ -167,7 +159,7 @@ export default function AvailabilityPage() {
     if (selectionHasConfirmed(start, end)) {
       setSelectedRange(null);
       setPriceInfo(null);
-      setMsg("Those dates include unavailable (booked) days. Please choose available dates.");
+      setMsg("Those dates include booked days. Please choose available dates.");
       return;
     }
 
@@ -211,12 +203,24 @@ export default function AvailabilityPage() {
           <FullCalendar
             plugins={[dayGridPlugin, interactionPlugin]}
             initialView="dayGridMonth"
-            selectable
-            selectMirror
-            select={onSelect}
             height="auto"
             dayCellClassNames={dayCellClassNames}
             events={rateEvents}
+            selectable={true}
+            selectMirror={true}
+            unselectAuto={true}
+            select={onSelect}
+
+            // ✅ KEY FIX: allow selecting even if rate background ranges overlap
+            selectOverlap={true}
+            selectAllow={() => true}
+
+            // ✅ makes dragging easier on touch devices
+            longPressDelay={50}
+            selectLongPressDelay={50}
+
+            // optional
+            dragScroll={true}
           />
         </div>
 
@@ -227,7 +231,15 @@ export default function AvailabilityPage() {
             <div style={{ opacity: 0.75 }}>
               Drag across the calendar to select your stay.
               {msg && (
-                <div style={{ marginTop: 10, padding: 10, borderRadius: 10, border: "1px solid #ffd0d0", background: "#fff3f3" }}>
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: 10,
+                    borderRadius: 10,
+                    border: "1px solid #ffd0d0",
+                    background: "#fff3f3",
+                  }}
+                >
                   {msg}
                 </div>
               )}
@@ -243,7 +255,15 @@ export default function AvailabilityPage() {
                 <div style={{ fontWeight: 700 }}>{selectedRange.end}</div>
               </div>
 
-              <div style={{ padding: 12, borderRadius: 12, border: "1px solid #eee", background: "#fafafa", marginBottom: 12 }}>
+              <div
+                style={{
+                  padding: 12,
+                  borderRadius: 12,
+                  border: "1px solid #eee",
+                  background: "#fafafa",
+                  marginBottom: 12,
+                }}
+              >
                 <div style={{ fontSize: 12, opacity: 0.7 }}>Estimated price</div>
                 {priceInfo?.ok ? (
                   <div style={{ fontSize: 20, fontWeight: 800 }}>£{priceInfo.total}</div>
