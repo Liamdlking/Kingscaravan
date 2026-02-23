@@ -8,7 +8,7 @@ import type { DateSelectArg, DayCellContentArg } from "@fullcalendar/core";
 
 type Booking = {
   start_date: string;
-  end_date: string; // checkout (not booked)
+  end_date: string; // checkout day (NOT booked)
   status: "provisional" | "confirmed";
 };
 
@@ -34,32 +34,28 @@ function addDaysISO(date: string, days: number) {
   return d.toISOString().slice(0, 10);
 }
 
-// nights booked are [start, checkout) so nights = checkout-start
+function eachDay(startISO: string, endISO: string) {
+  const out: string[] = [];
+  const start = new Date(`${startISO}T00:00:00Z`);
+  const end = new Date(`${endISO}T00:00:00Z`);
+  for (let d = new Date(start); d < end; d.setUTCDate(d.getUTCDate() + 1)) {
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
 function nightsCount(start: string, checkout: string) {
   const s = new Date(`${start}T00:00:00Z`).getTime();
   const e = new Date(`${checkout}T00:00:00Z`).getTime();
   return Math.round((e - s) / 86400000);
 }
 
-function eachDay(startISO: string, endISO: string) {
-  const out: string[] = [];
-  let d = new Date(`${startISO}T00:00:00Z`);
-  const end = new Date(`${endISO}T00:00:00Z`);
-  while (d < end) {
-    out.push(d.toISOString().slice(0, 10));
-    d.setUTCDate(d.getUTCDate() + 1);
-  }
-  return out;
-}
-
 function calcPrice(startISO: string, checkoutISO: string, rates: Rate[]) {
-  // If there's a TOTAL rate that exactly matches, use it
   const exactTotal = rates.find(
     (r) => r.rate_type === "total" && r.start_date === startISO && r.end_date === checkoutISO
   );
   if (exactTotal) return { ok: true as const, total: Number(exactTotal.price), method: "total" as const };
 
-  // Else sum nightly rates for each night in [start, checkout)
   const nights = eachDay(startISO, checkoutISO);
   let total = 0;
 
@@ -91,32 +87,50 @@ export default function AvailabilityPage() {
     })();
   }, []);
 
-  const { confirmedDates, provisionalDates } = useMemo(() => {
-    const confirmed = new Set<string>();
-    const provisional = new Set<string>();
+  // --- HALF-DAY MARKERS (check-in / checkout) ---
+  const markers = useMemo(() => {
+    const confirmedFull = new Set<string>();
+    const provisionalFull = new Set<string>();
+
+    const inConfirmed = new Set<string>();
+    const inProvisional = new Set<string>();
+
+    const outConfirmed = new Set<string>();
+    const outProvisional = new Set<string>();
 
     for (const b of bookings) {
       const days = eachDay(b.start_date, b.end_date);
-      if (b.status === "confirmed") days.forEach((d) => confirmed.add(d));
-      if (b.status === "provisional") days.forEach((d) => provisional.add(d));
+      if (b.status === "confirmed") {
+        days.forEach((d) => confirmedFull.add(d));
+        inConfirmed.add(b.start_date);
+        outConfirmed.add(b.end_date);
+      } else {
+        days.forEach((d) => provisionalFull.add(d));
+        inProvisional.add(b.start_date);
+        outProvisional.add(b.end_date);
+      }
     }
-    return { confirmedDates: confirmed, provisionalDates: provisional };
+
+    return { confirmedFull, provisionalFull, inConfirmed, inProvisional, outConfirmed, outProvisional };
   }, [bookings]);
 
-  function hasConfirmedInRange(startISO: string, checkoutISO: string) {
-    const days = eachDay(startISO, checkoutISO);
-    return days.some((d) => confirmedDates.has(d));
-  }
-
-  // 🟢🟠🔴 day background classes
   const dayCellClassNames = (info: any) => {
     const d = isoLocal(info.date);
-    if (confirmedDates.has(d)) return ["day-confirmed"];
-    if (provisionalDates.has(d)) return ["day-provisional"];
-    return ["day-available"];
+    const classes: string[] = [];
+
+    if (markers.confirmedFull.has(d)) classes.push("day-confirmed");
+    else if (markers.provisionalFull.has(d)) classes.push("day-provisional");
+    else classes.push("day-available");
+
+    // right half = check-in, left half = checkout
+    if (markers.inConfirmed.has(d)) classes.push("in-confirmed");
+    if (markers.inProvisional.has(d)) classes.push("in-provisional");
+    if (markers.outConfirmed.has(d)) classes.push("out-confirmed");
+    if (markers.outProvisional.has(d)) classes.push("out-provisional");
+
+    return classes;
   };
 
-  // Show nightly price badge on each day if there is a nightly rate covering that day
   const dayCellContent = (arg: DayCellContentArg) => {
     const dayISO = isoLocal(arg.date);
 
@@ -125,14 +139,16 @@ export default function AvailabilityPage() {
     return (
       <div style={{ padding: 4 }}>
         <div>{arg.dayNumberText}</div>
-        {nightly && (
-          <div style={{ fontSize: 11, opacity: 0.75, marginTop: 2 }}>
-            £{nightly.price}/n
-          </div>
-        )}
+        {nightly && <div style={{ fontSize: 11, opacity: 0.75, marginTop: 2 }}>£{nightly.price}/n</div>}
       </div>
     );
   };
+
+  function hasConfirmedInRange(startISO: string, checkoutISO: string) {
+    // nights are [start, checkout) but checkout is NOT booked — ok to exclude
+    const days = eachDay(startISO, checkoutISO);
+    return days.some((d) => markers.confirmedFull.has(d));
+  }
 
   function onSelect(sel: DateSelectArg) {
     setMsg("");
@@ -142,7 +158,6 @@ export default function AvailabilityPage() {
     // ✅ last highlighted day should be checkout day
     const checkout = addDaysISO(isoLocal(sel.end), -1);
 
-    // basic sanity
     const n = nightsCount(start, checkout);
     if (n < 1) {
       setSelectedRange(null);
@@ -182,14 +197,39 @@ export default function AvailabilityPage() {
         .day-available { background: rgba(34,197,94,0.10); }
         .day-confirmed { background: rgba(239,68,68,0.12); }
         .day-provisional { background: rgba(245,158,11,0.14); }
-        .fc .fc-daygrid-day-frame { border-radius: 10px; overflow: hidden; }
+
+        .fc .fc-daygrid-day-frame {
+          border-radius: 10px;
+          overflow: hidden;
+          position: relative;
+        }
+
+        .fc .fc-daygrid-day-frame::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          background: linear-gradient(
+            90deg,
+            var(--leftOverlay, transparent) 0%,
+            var(--leftOverlay, transparent) 50%,
+            var(--rightOverlay, transparent) 50%,
+            var(--rightOverlay, transparent) 100%
+          );
+        }
+
+        .out-confirmed { --leftOverlay: rgba(239,68,68,0.26); }
+        .in-confirmed { --rightOverlay: rgba(239,68,68,0.26); }
+
+        .out-provisional { --leftOverlay: rgba(245,158,11,0.28); }
+        .in-provisional { --rightOverlay: rgba(245,158,11,0.28); }
       `}</style>
 
       <h1 style={{ margin: "0 0 6px" }}>Availability</h1>
       <p style={{ margin: "0 0 12px", opacity: 0.75 }}>
         Drag to include your checkout day (e.g. drag <b>Mon–Fri</b> for a <b>Friday checkout</b>).
         <br />
-        🟢 Available • 🟠 Provisional • 🔴 Booked
+        🟢 Available • 🟠 Provisional • 🔴 Booked — with half highlights for check-in/out days.
       </p>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 14 }}>
@@ -214,7 +254,15 @@ export default function AvailabilityPage() {
             <div style={{ opacity: 0.75 }}>
               Drag across the calendar to select your stay.
               {msg && (
-                <div style={{ marginTop: 10, padding: 10, borderRadius: 10, border: "1px solid #ffd0d0", background: "#fff3f3" }}>
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: 10,
+                    borderRadius: 10,
+                    border: "1px solid #ffd0d0",
+                    background: "#fff3f3",
+                  }}
+                >
                   {msg}
                 </div>
               )}
@@ -235,7 +283,15 @@ export default function AvailabilityPage() {
                 ⭐ <b>Nights:</b> {nightsCount(selectedRange.start, selectedRange.checkout)}
               </div>
 
-              <div style={{ padding: 12, borderRadius: 12, border: "1px solid #eee", background: "#fafafa", marginBottom: 12 }}>
+              <div
+                style={{
+                  padding: 12,
+                  borderRadius: 12,
+                  border: "1px solid #eee",
+                  background: "#fafafa",
+                  marginBottom: 12,
+                }}
+              >
                 <div style={{ fontSize: 12, opacity: 0.7 }}>Estimated price</div>
                 {priceInfo?.ok ? (
                   <div style={{ fontSize: 20, fontWeight: 900 }}>£{priceInfo.total}</div>
