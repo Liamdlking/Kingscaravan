@@ -7,7 +7,7 @@ import interactionPlugin, { DateClickArg } from "@fullcalendar/interaction";
 
 type Booking = {
   start_date: string;
-  end_date: string; // exclusive (checkout day)
+  end_date: string; // checkout day (not booked)
   status: "provisional" | "confirmed";
 };
 
@@ -20,75 +20,105 @@ type Rate = {
   note?: string | null;
 };
 
-function iso(d: Date) {
+function isoLocal(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
 
+function addDaysISO(date: string, days: number) {
+  const d = new Date(`${date}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return isoLocal(d);
+}
+
 function eachDay(startISO: string, endISO: string) {
   const out: string[] = [];
-  const start = new Date(`${startISO}T00:00:00.000Z`);
-  const end = new Date(`${endISO}T00:00:00.000Z`);
-  for (let d = new Date(start); d < end; d.setUTCDate(d.getUTCDate() + 1)) {
-    out.push(d.toISOString().slice(0, 10));
+  const start = new Date(`${startISO}T00:00:00`);
+  const end = new Date(`${endISO}T00:00:00`);
+
+  for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
+    out.push(isoLocal(d));
   }
+
   return out;
 }
 
 function nightsCount(startISO: string, endISO: string) {
-  const a = new Date(`${startISO}T00:00:00Z`).getTime();
-  const b = new Date(`${endISO}T00:00:00Z`).getTime();
-  return Math.round((b - a) / 86400000);
+  const s = new Date(`${startISO}T00:00:00`).getTime();
+  const e = new Date(`${endISO}T00:00:00`).getTime();
+  return Math.round((e - s) / 86400000);
 }
 
 function isAllowedPattern(startISO: string, endISO: string) {
-  const start = new Date(`${startISO}T00:00:00Z`);
-  const end = new Date(`${endISO}T00:00:00Z`);
+  const start = new Date(`${startISO}T00:00:00`);
+  const end = new Date(`${endISO}T00:00:00`);
   const len = nightsCount(startISO, endISO);
 
   if (len < 3) return { ok: false, reason: "Minimum stay is 3 nights." };
 
-  const startDay = start.getUTCDay(); // 0 Sun .. 6 Sat
-  const endDay = end.getUTCDay();
+  const startDay = start.getDay(); // 0 Sun .. 6 Sat
+  const endDay = end.getDay();
 
-  // Fri → Mon (3 nights)
+  // Fri → Mon
   if (startDay === 5 && endDay === 1) return { ok: true, reason: "" };
-  // Mon → Fri (4 nights)
+
+  // Mon → Fri
   if (startDay === 1 && endDay === 5) return { ok: true, reason: "" };
-  // Sat → Sat (7 nights)
+
+  // Sat → Sat
   if (startDay === 6 && endDay === 6) return { ok: true, reason: "" };
 
-  return { ok: false, reason: "Allowed stays are Fri–Mon, Mon–Fri, or Sat–Sat." };
+  return {
+    ok: false,
+    reason: "Allowed stays are Fri–Mon, Mon–Fri, or Sat–Sat.",
+  };
 }
 
 function calcPrice(startISO: string, endISO: string, rates: Rate[]) {
+  // exact total match
   const exactTotal = rates.find(
     (r) => r.rate_type === "total" && r.start_date === startISO && r.end_date === endISO
   );
   if (exactTotal) {
-    return { ok: true as const, total: Number(exactTotal.price), method: "total" as const };
+    return {
+      ok: true as const,
+      total: Number(exactTotal.price),
+      method: "total" as const,
+    };
   }
 
+  // nightly sum
   const nights = eachDay(startISO, endISO);
   let total = 0;
 
   for (const day of nights) {
-    const nightly = rates.find((r) => r.rate_type === "nightly" && r.start_date <= day && day < r.end_date);
-    if (!nightly) return { ok: false as const, total: null, method: "missing" as const };
+    const nightly = rates.find(
+      (r) => r.rate_type === "nightly" && r.start_date <= day && day < r.end_date
+    );
+    if (!nightly) {
+      return {
+        ok: false as const,
+        total: null,
+        method: "missing" as const,
+      };
+    }
     total += Number(nightly.price);
   }
 
-  return { ok: true as const, total, method: "nightly" as const };
+  return {
+    ok: true as const,
+    total,
+    method: "nightly" as const,
+  };
 }
 
 export default function AvailabilityPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [rates, setRates] = useState<Rate[]>([]);
-  const [msg, setMsg] = useState<string>("");
+  const [msg, setMsg] = useState("");
 
-  // click-to-select
   const [checkIn, setCheckIn] = useState<string | null>(null);
   const [checkOut, setCheckOut] = useState<string | null>(null);
 
@@ -104,70 +134,69 @@ export default function AvailabilityPage() {
     })();
   }, []);
 
-  const { confirmedDates, provisionalDates } = useMemo(() => {
-    const confirmed = new Set<string>();
-    const provisional = new Set<string>();
+  const markers = useMemo(() => {
+    const confirmedFull = new Set<string>();
+    const provisionalFull = new Set<string>();
+
+    const inConfirmed = new Set<string>();
+    const inProvisional = new Set<string>();
+
+    const outConfirmed = new Set<string>();
+    const outProvisional = new Set<string>();
 
     for (const b of bookings) {
       const days = eachDay(b.start_date, b.end_date);
-      if (b.status === "confirmed") days.forEach((d) => confirmed.add(d));
-      if (b.status === "provisional") days.forEach((d) => provisional.add(d));
+
+      if (b.status === "confirmed") {
+        days.forEach((d) => confirmedFull.add(d));
+        inConfirmed.add(b.start_date);
+        outConfirmed.add(b.end_date);
+      } else {
+        days.forEach((d) => provisionalFull.add(d));
+        inProvisional.add(b.start_date);
+        outProvisional.add(b.end_date);
+      }
     }
 
-    return { confirmedDates: confirmed, provisionalDates: provisional };
+    return {
+      confirmedFull,
+      provisionalFull,
+      inConfirmed,
+      inProvisional,
+      outConfirmed,
+      outProvisional,
+    };
   }, [bookings]);
+
+  const dayCellClassNames = (info: any) => {
+    const d = isoLocal(info.date);
+    const classes: string[] = [];
+
+    if (markers.confirmedFull.has(d)) classes.push("day-confirmed");
+    else if (markers.provisionalFull.has(d)) classes.push("day-provisional");
+    else classes.push("day-available");
+
+    if (markers.inConfirmed.has(d)) classes.push("in-confirmed");
+    if (markers.inProvisional.has(d)) classes.push("in-provisional");
+    if (markers.outConfirmed.has(d)) classes.push("out-confirmed");
+    if (markers.outProvisional.has(d)) classes.push("out-provisional");
+
+    return classes;
+  };
 
   function selectionHasConfirmed(startISO: string, endISO: string) {
     const days = eachDay(startISO, endISO);
-    return days.some((d) => confirmedDates.has(d));
+    return days.some((d) => markers.confirmedFull.has(d));
   }
-
-  const dayCellClassNames = (info: any) => {
-    const d = info.date.toISOString().slice(0, 10);
-    if (confirmedDates.has(d)) return ["day-confirmed"];
-    if (provisionalDates.has(d)) return ["day-provisional"];
-    return ["day-available"];
-  };
-
-  const priceInfo = useMemo(() => {
-    if (!checkIn || !checkOut) return null;
-    return calcPrice(checkIn, checkOut, rates);
-  }, [checkIn, checkOut, rates]);
-
-  // Visual: show selected range as background
-  const selectionEvent = useMemo(() => {
-    if (!checkIn || !checkOut) return [];
-    return [
-      {
-        id: "selected-range",
-        start: checkIn,
-        end: checkOut, // checkout day (exclusive)
-        display: "background" as const,
-        backgroundColor: "rgba(59,130,246,0.18)",
-      },
-    ];
-  }, [checkIn, checkOut]);
-
-  // faint rate spans (optional)
-  const rateEvents = useMemo(() => {
-    return rates.map((r) => ({
-      id: `rate-${r.id}`,
-      start: r.start_date,
-      end: r.end_date,
-      title: "",
-      display: "background" as const,
-      backgroundColor: "rgba(34,197,94,0.08)",
-    }));
-  }, [rates]);
 
   function onDateClick(arg: DateClickArg) {
     setMsg("");
-    const clicked = arg.date.toISOString().slice(0, 10);
+    const clicked = arg.dateStr; // ✅ exact calendar date clicked
 
-    // If starting selection
+    // First click = check-in
     if (!checkIn) {
-      if (confirmedDates.has(clicked)) {
-        setMsg("That date is not available. Please choose an available check-in date.");
+      if (markers.confirmedFull.has(clicked)) {
+        setMsg("That date is unavailable. Please choose another check-in date.");
         return;
       }
       setCheckIn(clicked);
@@ -175,36 +204,34 @@ export default function AvailabilityPage() {
       return;
     }
 
-    // Setting checkout
+    // Second click = checkout
     if (checkIn && !checkOut) {
       if (clicked <= checkIn) {
-        setMsg("Checkout must be after check-in. Please choose a later date.");
+        setMsg("Checkout must be after check-in.");
         return;
       }
 
-      const start = checkIn;
-      const end = clicked; // user clicked checkout day
-
-      const rule = isAllowedPattern(start, end);
+      const rule = isAllowedPattern(checkIn, clicked);
       if (!rule.ok) {
         setMsg(rule.reason);
         return;
       }
 
-      if (selectionHasConfirmed(start, end)) {
-        setMsg("Those dates include booked (unavailable) days. Please choose different dates.");
+      if (selectionHasConfirmed(checkIn, clicked)) {
+        setMsg("Those dates include unavailable days. Please choose another stay.");
         return;
       }
 
-      setCheckOut(end);
+      setCheckOut(clicked); // ✅ exact clicked day becomes checkout
       return;
     }
 
-    // If both set, start again
-    if (confirmedDates.has(clicked)) {
-      setMsg("That date is not available. Please choose an available check-in date.");
+    // Third click resets and starts again
+    if (markers.confirmedFull.has(clicked)) {
+      setMsg("That date is unavailable. Please choose another check-in date.");
       return;
     }
+
     setCheckIn(clicked);
     setCheckOut(null);
   }
@@ -214,6 +241,34 @@ export default function AvailabilityPage() {
     setCheckOut(null);
     setMsg("");
   }
+
+  const priceInfo = useMemo(() => {
+    if (!checkIn || !checkOut) return null;
+    return calcPrice(checkIn, checkOut, rates);
+  }, [checkIn, checkOut, rates]);
+
+  const nights = useMemo(() => {
+    if (!checkIn || !checkOut) return null;
+    return nightsCount(checkIn, checkOut);
+  }, [checkIn, checkOut]);
+
+  const selectionEvent = useMemo(() => {
+    if (!checkIn) return [];
+
+    // Highlight selected nights only. If checkout chosen, highlight [checkIn, checkOut)
+    // If only check-in chosen, highlight just that day visually.
+    const end = checkOut ?? addDaysISO(checkIn, 1);
+
+    return [
+      {
+        id: "selected-range",
+        start: checkIn,
+        end,
+        display: "background" as const,
+        backgroundColor: "rgba(59,130,246,0.18)",
+      },
+    ];
+  }, [checkIn, checkOut]);
 
   function requestBooking() {
     if (!checkIn || !checkOut) return;
@@ -230,24 +285,51 @@ export default function AvailabilityPage() {
     window.location.href = `/book?${params.toString()}`;
   }
 
-  const nights = checkIn && checkOut ? nightsCount(checkIn, checkOut) : null;
-
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 18 }}>
       <style>{`
-        .day-available { background: rgba(34,197,94,0.10); }
-        .day-confirmed { background: rgba(239,68,68,0.12); }
-        .day-provisional { background: rgba(245,158,11,0.14); }
-        .fc .fc-daygrid-day-frame { border-radius: 10px; overflow: hidden; }
+        .fc .fc-daygrid-day.day-available .fc-daygrid-day-frame { background: rgba(34,197,94,0.10); }
+        .fc .fc-daygrid-day.day-confirmed .fc-daygrid-day-frame { background: rgba(239,68,68,0.12); }
+        .fc .fc-daygrid-day.day-provisional .fc-daygrid-day-frame { background: rgba(245,158,11,0.14); }
+
+        .fc .fc-daygrid-day-frame {
+          border-radius: 10px;
+          overflow: hidden;
+          position: relative;
+        }
+
+        .fc .fc-daygrid-day-frame::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          border-radius: 10px;
+          background: linear-gradient(
+            90deg,
+            var(--leftOverlay, transparent) 0%,
+            var(--leftOverlay, transparent) 50%,
+            var(--rightOverlay, transparent) 50%,
+            var(--rightOverlay, transparent) 100%
+          );
+        }
+
+        .fc .fc-daygrid-day.out-confirmed { --leftOverlay: rgba(239,68,68,0.26); }
+        .fc .fc-daygrid-day.in-confirmed  { --rightOverlay: rgba(239,68,68,0.26); }
+
+        .fc .fc-daygrid-day.out-provisional { --leftOverlay: rgba(245,158,11,0.28); }
+        .fc .fc-daygrid-day.in-provisional  { --rightOverlay: rgba(245,158,11,0.28); }
+
+        .fc .fc-daygrid-day-top,
+        .fc .fc-daygrid-day-events { position: relative; z-index: 1; }
       `}</style>
 
       <h1 style={{ margin: "0 0 6px" }}>Availability</h1>
       <p style={{ margin: "0 0 12px", opacity: 0.75 }}>
-        ✅ Click your <b>check-in</b> date, then click your <b>checkout</b> date.
+        Click your <b>check-in</b> date, then click your <b>checkout</b> date.
+        <br />
+        Example: click <b>Friday 17th</b>, then click <b>Monday 20th</b> for a Monday checkout.
         <br />
         Minimum stay <b>3 nights</b>. Allowed stays: <b>Fri–Mon</b>, <b>Mon–Fri</b>, or <b>Sat–Sat</b>.
-        <br />
-        🟢 Available • 🟠 Provisional • 🔴 Booked
       </p>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 14 }}>
@@ -255,11 +337,11 @@ export default function AvailabilityPage() {
           <FullCalendar
             plugins={[dayGridPlugin, interactionPlugin]}
             initialView="dayGridMonth"
+            height="auto"
             selectable={false}
             dateClick={onDateClick}
-            height="auto"
             dayCellClassNames={dayCellClassNames}
-            events={[...rateEvents, ...selectionEvent]}
+            events={selectionEvent}
           />
         </div>
 
@@ -281,34 +363,19 @@ export default function AvailabilityPage() {
               </div>
 
               {nights != null && (
-                <div style={{ marginBottom: 12, fontSize: 13, opacity: 0.8 }}>
+                <div style={{ marginBottom: 12 }}>
                   Nights: <b>{nights}</b>
                 </div>
               )}
 
               {checkIn && checkOut && (
-                <div
-                  style={{
-                    padding: 12,
-                    borderRadius: 12,
-                    border: "1px solid #eee",
-                    background: "#fafafa",
-                    marginBottom: 12,
-                  }}
-                >
+                <div style={{ padding: 12, borderRadius: 12, border: "1px solid #eee", background: "#fafafa", marginBottom: 12 }}>
                   <div style={{ fontSize: 12, opacity: 0.7 }}>Estimated price</div>
                   {priceInfo?.ok ? (
-                    <div style={{ fontSize: 22, fontWeight: 900 }}>£{priceInfo.total}</div>
+                    <div style={{ fontSize: 20, fontWeight: 900 }}>£{priceInfo.total}</div>
                   ) : (
                     <div style={{ fontWeight: 800 }}>Price not set for these dates</div>
                   )}
-                  <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
-                    {priceInfo?.ok
-                      ? priceInfo.method === "total"
-                        ? "Using a set total price for this date range."
-                        : "Using nightly rates across your selected nights."
-                      : "Owner has not set rates for one or more nights."}
-                  </div>
                 </div>
               )}
 
@@ -349,22 +416,10 @@ export default function AvailabilityPage() {
           )}
 
           {msg && (
-            <div
-              style={{
-                marginTop: 12,
-                padding: 10,
-                borderRadius: 10,
-                border: "1px solid #ffd0d0",
-                background: "#fff3f3",
-              }}
-            >
+            <div style={{ marginTop: 12, padding: 10, borderRadius: 10, border: "1px solid #ffd0d0", background: "#fff3f3" }}>
               {msg}
             </div>
           )}
-
-          <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-            This creates a provisional request — not confirmed until approved.
-          </div>
         </div>
       </div>
     </div>
