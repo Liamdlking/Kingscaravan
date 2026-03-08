@@ -379,6 +379,13 @@ export default function Dashboard() {
           margin-top: 2px;
         }
 
+        .fc .fc-daygrid-event-harness .fc-h-event,
+        .fc .fc-daygrid-event-harness .calendar-band {
+          display: block !important;
+          width: 100% !important;
+          max-width: 100% !important;
+        }
+
         .fc .calendar-band {
           border: none !important;
           border-radius: 0 !important;
@@ -408,7 +415,6 @@ export default function Dashboard() {
           background: #cfeecf !important;
         }
 
-        /* stepped / half-width ends */
         .fc .calendar-band.fc-event-start:not(.fc-event-end) {
           margin-left: 50% !important;
           border-top-left-radius: 0 !important;
@@ -432,6 +438,8 @@ export default function Dashboard() {
           gap: 2px;
           padding: 2px 4px;
           overflow: hidden;
+          width: 100%;
+          box-sizing: border-box;
         }
 
         .fc .band-price,
