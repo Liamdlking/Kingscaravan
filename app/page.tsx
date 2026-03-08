@@ -4,12 +4,12 @@ import React, { useEffect, useMemo, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import type { DateSelectArg, EventClickArg } from "@fullcalendar/core";
+import type { DateSelectArg, EventClickArg, EventContentArg } from "@fullcalendar/core";
 
 type Booking = {
   id: string;
-  start_date: string; // YYYY-MM-DD
-  end_date: string; // YYYY-MM-DD (checkout day, NOT booked)
+  start_date: string;
+  end_date: string; // checkout day
   status?: "provisional" | "confirmed" | null;
 
   guest_name: string | null;
@@ -31,8 +31,8 @@ type Booking = {
 
 type Rate = {
   id: string;
-  start_date: string; // YYYY-MM-DD
-  end_date: string; // YYYY-MM-DD exclusive
+  start_date: string;
+  end_date: string; // exclusive
   price: number;
   rate_type: "nightly" | "total";
   note?: string | null;
@@ -51,7 +51,6 @@ function isoLocal(d: Date) {
 }
 
 function eachDay(startISO: string, endISO: string) {
-  // days in [startISO, endISO) - end is exclusive
   const out: string[] = [];
   const start = new Date(`${startISO}T00:00:00Z`);
   const end = new Date(`${endISO}T00:00:00Z`);
@@ -66,7 +65,6 @@ function fmtRange(start: string, end: string) {
 }
 
 function calcBookingPrice(startISO: string, endISO: string, rates: Rate[]) {
-  // 1) exact TOTAL match
   const exactTotal = rates.find(
     (r) => r.rate_type === "total" && r.start_date === startISO && r.end_date === endISO
   );
@@ -74,7 +72,6 @@ function calcBookingPrice(startISO: string, endISO: string, rates: Rate[]) {
     return { ok: true as const, total: Number(exactTotal.price), method: "total" as const };
   }
 
-  // 2) sum nightly across [start,end)
   const nights = eachDay(startISO, endISO);
   let total = 0;
 
@@ -120,7 +117,7 @@ export default function Dashboard() {
 
   async function onSelect(sel: DateSelectArg) {
     const start_date = isoLocal(sel.start);
-    const end_date = isoLocal(sel.end); // FullCalendar select end is exclusive
+    const end_date = isoLocal(sel.end);
 
     if (mode === "bookings") {
       const res = await fetch("/api/bookings", {
@@ -144,7 +141,6 @@ export default function Dashboard() {
       return;
     }
 
-    // Pricing mode - creates a draft rate block
     setEditor({
       type: "rate",
       rate: { id: "", start_date, end_date, price: 0, rate_type: "total", note: null },
@@ -156,14 +152,12 @@ export default function Dashboard() {
     const ext = arg.event.extendedProps as any;
 
     if (ext.kind === "booking") {
-      const b: Booking = ext.booking;
-      setEditor({ type: "booking", booking: b, draft: { ...b } });
+      setEditor({ type: "booking", booking: ext.booking, draft: { ...ext.booking } });
       return;
     }
+
     if (ext.kind === "rate") {
-      const r: Rate = ext.rate;
-      setEditor({ type: "rate", rate: r, draft: { ...r } });
-      return;
+      setEditor({ type: "rate", rate: ext.rate, draft: { ...ext.rate } });
     }
   }
 
@@ -186,18 +180,14 @@ export default function Dashboard() {
         start_date: d.start_date,
         end_date: d.end_date,
         status: d.status ?? "provisional",
-
         guest_name: d.guest_name,
         guest_email: d.guest_email,
         phone: d.phone,
-
         contact: d.contact,
         notes: d.notes,
-
         guests_count: d.guests_count,
         children_count: d.children_count,
         dogs_count: d.dogs_count,
-
         vehicle_reg: d.vehicle_reg,
         special_requests: d.special_requests,
       }),
@@ -240,7 +230,6 @@ export default function Dashboard() {
 
     setEditor({ ...editor, saving: true, err: "" });
 
-    // If editing an existing rate, delete it and re-insert
     if (editor.rate.id) {
       await fetch(`/api/rates?id=${encodeURIComponent(editor.rate.id)}`, { method: "DELETE" });
     }
@@ -268,80 +257,83 @@ export default function Dashboard() {
     await loadAll();
   }
 
-  // --- HALF-DAY MARKERS (check-in / checkout) ---
-  const markers = useMemo(() => {
-    const confirmedFull = new Set<string>();
-    const provisionalFull = new Set<string>();
-
-    const inConfirmed = new Set<string>();
-    const inProvisional = new Set<string>();
-
-    const outConfirmed = new Set<string>();
-    const outProvisional = new Set<string>();
-
-    for (const b of bookings) {
-      const days = eachDay(b.start_date, b.end_date); // booked nights
+  const bookingEvents = useMemo(() => {
+    return bookings.map((b) => {
+      const price = calcBookingPrice(b.start_date, b.end_date, rates);
       const status = (b.status ?? "confirmed") as "confirmed" | "provisional";
-
-      if (status === "confirmed") {
-        days.forEach((d) => confirmedFull.add(d));
-        inConfirmed.add(b.start_date);
-        outConfirmed.add(b.end_date); // checkout day
-      } else {
-        days.forEach((d) => provisionalFull.add(d));
-        inProvisional.add(b.start_date);
-        outProvisional.add(b.end_date);
-      }
-    }
-
-    return { confirmedFull, provisionalFull, inConfirmed, inProvisional, outConfirmed, outProvisional };
-  }, [bookings]);
-
-  const dayCellClassNames = (info: any) => {
-    const d = info.date.toISOString().slice(0, 10);
-    const classes: string[] = [];
-
-    if (markers.confirmedFull.has(d)) classes.push("day-confirmed");
-    else if (markers.provisionalFull.has(d)) classes.push("day-provisional");
-    else classes.push("day-available");
-
-    if (markers.inConfirmed.has(d)) classes.push("in-confirmed");
-    if (markers.inProvisional.has(d)) classes.push("in-provisional");
-    if (markers.outConfirmed.has(d)) classes.push("out-confirmed");
-    if (markers.outProvisional.has(d)) classes.push("out-provisional");
-
-    return classes;
-  };
-
-  const events = useMemo(() => {
-    const rateEvents = rates.map((r) => ({
-      id: `rate-${r.id}`,
-      title: r.rate_type === "nightly" ? `£${r.price}/night` : `£${r.price} total`,
-      start: r.start_date,
-      end: r.end_date,
-      backgroundColor: "rgba(34,197,94,0.18)",
-      borderColor: "rgba(34,197,94,0.45)",
-      textColor: "#0f5132",
-      extendedProps: { kind: "rate", rate: r },
-    }));
-
-    const bookingEvents = bookings.map((b) => {
-      const status = (b.status ?? "confirmed") as "confirmed" | "provisional";
-      const color = status === "confirmed" ? "#ef4444" : "#f59e0b";
       return {
         id: `booking-${b.id}`,
         title: b.guest_name ?? "Booking",
         start: b.start_date,
         end: b.end_date,
-        backgroundColor: color,
-        borderColor: color,
-        textColor: "#111",
-        extendedProps: { kind: "booking", booking: b },
+        allDay: true,
+        display: "block" as const,
+        extendedProps: {
+          kind: "booking",
+          booking: b,
+          bookingPrice: price.ok ? price.total : null,
+          bookingStatus: status,
+        },
       };
     });
+  }, [bookings, rates]);
 
-    return [...rateEvents, ...bookingEvents];
-  }, [rates, bookings]);
+  const rateEvents = useMemo(() => {
+    return rates.map((r) => ({
+      id: `rate-${r.id}`,
+      title: r.rate_type === "nightly" ? `£${r.price}/night` : `£${r.price} total`,
+      start: r.start_date,
+      end: r.end_date,
+      allDay: true,
+      display: "block" as const,
+      extendedProps: {
+        kind: "rate",
+        rate: r,
+      },
+    }));
+  }, [rates]);
+
+  const allEvents = useMemo(() => [...rateEvents, ...bookingEvents], [rateEvents, bookingEvents]);
+
+  function eventClassNames(arg: any) {
+    const ext = arg.event.extendedProps || {};
+    if (ext.kind === "booking") {
+      const status = ext.bookingStatus as "confirmed" | "provisional";
+      return [
+        "calendar-band",
+        "booking-band",
+        status === "confirmed" ? "booking-confirmed" : "booking-provisional",
+      ];
+    }
+    if (ext.kind === "rate") {
+      return ["calendar-band", "rate-band"];
+    }
+    return [];
+  }
+
+  function eventContent(arg: EventContentArg) {
+    const ext: any = arg.event.extendedProps || {};
+
+    if (ext.kind === "booking") {
+      const price = ext.bookingPrice;
+      return (
+        <div className="band-inner">
+          {price != null && <div className="band-price">£{price} total</div>}
+          <div className="band-title">{arg.event.title}</div>
+        </div>
+      );
+    }
+
+    if (ext.kind === "rate") {
+      return (
+        <div className="band-inner">
+          <div className="band-rate">{arg.event.title}</div>
+        </div>
+      );
+    }
+
+    return <div>{arg.event.title}</div>;
+  }
 
   const upcoming = useMemo(() => {
     const copy = [...bookings];
@@ -361,39 +353,124 @@ export default function Dashboard() {
   return (
     <div style={styles.page}>
       <style>{`
-        .fc .fc-daygrid-day.day-available .fc-daygrid-day-frame { background: rgba(34,197,94,0.10); }
-        .fc .fc-daygrid-day.day-confirmed .fc-daygrid-day-frame { background: rgba(239,68,68,0.12); }
-        .fc .fc-daygrid-day.day-provisional .fc-daygrid-day-frame { background: rgba(245,158,11,0.14); }
-
         .fc .fc-daygrid-day-frame {
           border-radius: 10px;
+          overflow: visible;
+        }
+
+        .fc .fc-daygrid-day {
+          background: #f8fafc;
+        }
+
+        .fc .fc-scrollgrid,
+        .fc .fc-scrollgrid td,
+        .fc .fc-scrollgrid th {
+          border-color: #e5e7eb;
+        }
+
+        .fc .fc-col-header-cell-cushion,
+        .fc .fc-daygrid-day-number {
+          color: #111827;
+          text-decoration: none !important;
+          font-weight: 700;
+        }
+
+        .fc .fc-daygrid-event-harness {
+          margin-top: 2px;
+        }
+
+        .fc .calendar-band {
+          border: none !important;
+          border-radius: 0 !important;
+          padding: 0 !important;
+          min-height: 22px;
+          box-shadow: none !important;
+        }
+
+        .fc .calendar-band.booking-band {
+          min-height: 34px;
+        }
+
+        .fc .calendar-band.rate-band {
+          min-height: 18px;
+          opacity: 0.9;
+        }
+
+        .fc .booking-confirmed {
+          background: #f7cfd2 !important;
+        }
+
+        .fc .booking-provisional {
+          background: #f4d08a !important;
+        }
+
+        .fc .rate-band {
+          background: #cfeecf !important;
+        }
+
+        /* stepped / half-width ends */
+        .fc .calendar-band.fc-event-start:not(.fc-event-end) {
+          margin-left: 50% !important;
+          border-top-left-radius: 0 !important;
+          border-bottom-left-radius: 0 !important;
+        }
+
+        .fc .calendar-band.fc-event-end:not(.fc-event-start) {
+          margin-right: 50% !important;
+          border-top-right-radius: 0 !important;
+          border-bottom-right-radius: 0 !important;
+        }
+
+        .fc .calendar-band.fc-event-start.fc-event-end {
+          margin-left: 50% !important;
+          margin-right: 50% !important;
+        }
+
+        .fc .band-inner {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          padding: 2px 4px;
           overflow: hidden;
-          position: relative;
         }
 
-        .fc .fc-daygrid-day-frame::after {
-          content: "";
-          position: absolute;
-          inset: 0;
-          pointer-events: none;
-          border-radius: 10px;
-          background: linear-gradient(
-            90deg,
-            var(--leftOverlay, transparent) 0%,
-            var(--leftOverlay, transparent) 50%,
-            var(--rightOverlay, transparent) 50%,
-            var(--rightOverlay, transparent) 100%
-          );
+        .fc .band-price,
+        .fc .band-rate {
+          font-size: 11px;
+          font-weight: 800;
+          color: #1f2937;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          background: rgba(255,255,255,0.35);
+          padding: 1px 4px;
+          border-radius: 4px;
+          width: fit-content;
+          max-width: 100%;
         }
 
-        .fc .fc-daygrid-day.out-confirmed { --leftOverlay: rgba(239,68,68,0.26); }
-        .fc .fc-daygrid-day.in-confirmed  { --rightOverlay: rgba(239,68,68,0.26); }
+        .fc .band-title {
+          font-size: 12px;
+          font-weight: 900;
+          color: #7f1d1d;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          background: rgba(255,255,255,0.22);
+          padding: 1px 4px;
+          border-radius: 4px;
+          width: fit-content;
+          max-width: 100%;
+        }
 
-        .fc .fc-daygrid-day.out-provisional { --leftOverlay: rgba(245,158,11,0.28); }
-        .fc .fc-daygrid-day.in-provisional  { --rightOverlay: rgba(245,158,11,0.28); }
+        .fc .booking-provisional .band-title {
+          color: #92400e;
+        }
 
-        .fc .fc-daygrid-day-top,
-        .fc .fc-daygrid-day-events { position: relative; z-index: 1; }
+        .fc .fc-daygrid-more-link {
+          color: #374151;
+          font-weight: 700;
+        }
       `}</style>
 
       <div style={styles.header}>
@@ -433,9 +510,11 @@ export default function Dashboard() {
                 unselectAuto
                 select={onSelect}
                 eventClick={onEventClick}
-                events={events}
+                events={allEvents}
+                eventClassNames={eventClassNames}
+                eventContent={eventContent}
+                dayMaxEvents={4}
                 height="auto"
-                dayCellClassNames={dayCellClassNames}
               />
             )}
           </div>
@@ -608,24 +687,23 @@ export default function Dashboard() {
 
           {editor?.type === "booking" && (
             <>
-              <div style={styles.grid2}>
-                <Field label="Arrival">
-                  <input
-                    style={styles.input}
-                    type="date"
-                    value={String(editor.draft.start_date ?? "")}
-                    onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, start_date: e.target.value } })}
-                  />
-                </Field>
-                <Field label="Checkout">
-                  <input
-                    style={styles.input}
-                    type="date"
-                    value={String(editor.draft.end_date ?? "")}
-                    onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, end_date: e.target.value } })}
-                  />
-                </Field>
-              </div>
+              <Field label="Arrival">
+                <input
+                  style={styles.input}
+                  type="date"
+                  value={String(editor.draft.start_date ?? "")}
+                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, start_date: e.target.value } })}
+                />
+              </Field>
+
+              <Field label="Checkout">
+                <input
+                  style={styles.input}
+                  type="date"
+                  value={String(editor.draft.end_date ?? "")}
+                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, end_date: e.target.value } })}
+                />
+              </Field>
 
               <Field label="Status">
                 <select
@@ -648,75 +726,68 @@ export default function Dashboard() {
                 />
               </Field>
 
-              <div style={styles.grid2}>
-                <Field label="Email">
-                  <input
-                    style={styles.input}
-                    value={String(editor.draft.guest_email ?? "")}
-                    onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, guest_email: e.target.value } })}
-                  />
-                </Field>
-                <Field label="Phone">
-                  <input
-                    style={styles.input}
-                    value={String(editor.draft.phone ?? "")}
-                    onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, phone: e.target.value } })}
-                  />
-                </Field>
-              </div>
+              <Field label="Email">
+                <input
+                  style={styles.input}
+                  value={String(editor.draft.guest_email ?? "")}
+                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, guest_email: e.target.value } })}
+                />
+              </Field>
 
-              <div style={styles.grid2}>
-                <Field label="Guests">
-                  <input
-                    style={styles.input}
-                    type="number"
-                    min={1}
-                    max={8}
-                    value={Number(editor.draft.guests_count ?? 0)}
-                    onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, guests_count: Number(e.target.value) } })}
-                  />
-                </Field>
-                <Field label="Children">
-                  <input
-                    style={styles.input}
-                    type="number"
-                    min={0}
-                    max={8}
-                    value={Number(editor.draft.children_count ?? 0)}
-                    onChange={(e) =>
-                      setEditor({ ...editor, draft: { ...editor.draft, children_count: Number(e.target.value) } })
-                    }
-                  />
-                </Field>
-              </div>
+              <Field label="Phone">
+                <input
+                  style={styles.input}
+                  value={String(editor.draft.phone ?? "")}
+                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, phone: e.target.value } })}
+                />
+              </Field>
 
-              <div style={styles.grid2}>
-                <Field label="Dogs">
-                  <input
-                    style={styles.input}
-                    type="number"
-                    min={0}
-                    max={5}
-                    value={Number(editor.draft.dogs_count ?? 0)}
-                    onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, dogs_count: Number(e.target.value) } })}
-                  />
-                </Field>
-                <Field label="Vehicle reg">
-                  <input
-                    style={styles.input}
-                    value={String(editor.draft.vehicle_reg ?? "")}
-                    onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, vehicle_reg: e.target.value } })}
-                  />
-                </Field>
-              </div>
+              <Field label="Guests">
+                <input
+                  style={styles.input}
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={Number(editor.draft.guests_count ?? 0)}
+                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, guests_count: Number(e.target.value) } })}
+                />
+              </Field>
+
+              <Field label="Children">
+                <input
+                  style={styles.input}
+                  type="number"
+                  min={0}
+                  max={8}
+                  value={Number(editor.draft.children_count ?? 0)}
+                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, children_count: Number(e.target.value) } })}
+                />
+              </Field>
+
+              <Field label="Dogs">
+                <input
+                  style={styles.input}
+                  type="number"
+                  min={0}
+                  max={5}
+                  value={Number(editor.draft.dogs_count ?? 0)}
+                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, dogs_count: Number(e.target.value) } })}
+                />
+              </Field>
+
+              <Field label="Vehicle reg">
+                <input
+                  style={styles.input}
+                  value={String(editor.draft.vehicle_reg ?? "")}
+                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, vehicle_reg: e.target.value } })}
+                />
+              </Field>
 
               <Field label="Special requests">
                 <textarea
                   style={{ ...styles.input, minHeight: 80, resize: "vertical" }}
                   value={String(editor.draft.special_requests ?? "")}
-                  onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, special_requests: e.target.value } })
-                  }
+                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, special_requests: e.target.value } })}
                 />
               </Field>
 
@@ -798,11 +869,6 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #ddd",
     fontSize: 14,
     outline: "none",
-  },
-  grid2: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: 10,
   },
   hr: {
     height: 1,
