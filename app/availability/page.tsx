@@ -4,11 +4,14 @@ import React, { useEffect, useMemo, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin, { DateClickArg } from "@fullcalendar/interaction";
+import type { EventContentArg } from "@fullcalendar/core";
 
 type Booking = {
+  id?: string;
   start_date: string;
-  end_date: string; // checkout day (not booked)
+  end_date: string; // checkout day
   status: "provisional" | "confirmed";
+  guest_name?: string | null;
 };
 
 type Rate = {
@@ -27,21 +30,13 @@ function isoLocal(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
-function addDaysISO(date: string, days: number) {
-  const d = new Date(`${date}T00:00:00`);
-  d.setDate(d.getDate() + days);
-  return isoLocal(d);
-}
-
 function eachDay(startISO: string, endISO: string) {
   const out: string[] = [];
-  const start = new Date(`${startISO}T00:00:00`);
-  const end = new Date(`${endISO}T00:00:00`);
-
-  for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
-    out.push(isoLocal(d));
+  const start = new Date(`${startISO}T00:00:00Z`);
+  const end = new Date(`${endISO}T00:00:00Z`);
+  for (let d = new Date(start); d < end; d.setUTCDate(d.getUTCDate() + 1)) {
+    out.push(d.toISOString().slice(0, 10));
   }
-
   return out;
 }
 
@@ -58,38 +53,24 @@ function isAllowedPattern(startISO: string, endISO: string) {
 
   if (len < 3) return { ok: false, reason: "Minimum stay is 3 nights." };
 
-  const startDay = start.getDay(); // 0 Sun .. 6 Sat
+  const startDay = start.getDay();
   const endDay = end.getDay();
 
-  // Fri → Mon
-  if (startDay === 5 && endDay === 1) return { ok: true, reason: "" };
+  if (startDay === 5 && endDay === 1) return { ok: true, reason: "" }; // Fri-Mon
+  if (startDay === 1 && endDay === 5) return { ok: true, reason: "" }; // Mon-Fri
+  if (startDay === 6 && endDay === 6) return { ok: true, reason: "" }; // Sat-Sat
 
-  // Mon → Fri
-  if (startDay === 1 && endDay === 5) return { ok: true, reason: "" };
-
-  // Sat → Sat
-  if (startDay === 6 && endDay === 6) return { ok: true, reason: "" };
-
-  return {
-    ok: false,
-    reason: "Allowed stays are Fri–Mon, Mon–Fri, or Sat–Sat.",
-  };
+  return { ok: false, reason: "Allowed stays are Fri–Mon, Mon–Fri, or Sat–Sat." };
 }
 
 function calcPrice(startISO: string, endISO: string, rates: Rate[]) {
-  // exact total match
   const exactTotal = rates.find(
     (r) => r.rate_type === "total" && r.start_date === startISO && r.end_date === endISO
   );
   if (exactTotal) {
-    return {
-      ok: true as const,
-      total: Number(exactTotal.price),
-      method: "total" as const,
-    };
+    return { ok: true as const, total: Number(exactTotal.price), method: "total" as const };
   }
 
-  // nightly sum
   const nights = eachDay(startISO, endISO);
   let total = 0;
 
@@ -97,21 +78,11 @@ function calcPrice(startISO: string, endISO: string, rates: Rate[]) {
     const nightly = rates.find(
       (r) => r.rate_type === "nightly" && r.start_date <= day && day < r.end_date
     );
-    if (!nightly) {
-      return {
-        ok: false as const,
-        total: null,
-        method: "missing" as const,
-      };
-    }
+    if (!nightly) return { ok: false as const, total: null, method: "missing" as const };
     total += Number(nightly.price);
   }
 
-  return {
-    ok: true as const,
-    total,
-    method: "nightly" as const,
-  };
+  return { ok: true as const, total, method: "nightly" as const };
 }
 
 export default function AvailabilityPage() {
@@ -134,68 +105,26 @@ export default function AvailabilityPage() {
     })();
   }, []);
 
-  const markers = useMemo(() => {
-    const confirmedFull = new Set<string>();
-    const provisionalFull = new Set<string>();
-
-    const inConfirmed = new Set<string>();
-    const inProvisional = new Set<string>();
-
-    const outConfirmed = new Set<string>();
-    const outProvisional = new Set<string>();
-
-    for (const b of bookings) {
-      const days = eachDay(b.start_date, b.end_date);
-
-      if (b.status === "confirmed") {
-        days.forEach((d) => confirmedFull.add(d));
-        inConfirmed.add(b.start_date);
-        outConfirmed.add(b.end_date);
-      } else {
-        days.forEach((d) => provisionalFull.add(d));
-        inProvisional.add(b.start_date);
-        outProvisional.add(b.end_date);
-      }
-    }
-
-    return {
-      confirmedFull,
-      provisionalFull,
-      inConfirmed,
-      inProvisional,
-      outConfirmed,
-      outProvisional,
-    };
-  }, [bookings]);
-
-  const dayCellClassNames = (info: any) => {
-    const d = isoLocal(info.date);
-    const classes: string[] = [];
-
-    if (markers.confirmedFull.has(d)) classes.push("day-confirmed");
-    else if (markers.provisionalFull.has(d)) classes.push("day-provisional");
-    else classes.push("day-available");
-
-    if (markers.inConfirmed.has(d)) classes.push("in-confirmed");
-    if (markers.inProvisional.has(d)) classes.push("in-provisional");
-    if (markers.outConfirmed.has(d)) classes.push("out-confirmed");
-    if (markers.outProvisional.has(d)) classes.push("out-provisional");
-
-    return classes;
-  };
-
   function selectionHasConfirmed(startISO: string, endISO: string) {
     const days = eachDay(startISO, endISO);
-    return days.some((d) => markers.confirmedFull.has(d));
+    const confirmed = new Set(
+      bookings
+        .filter((b) => b.status === "confirmed")
+        .flatMap((b) => eachDay(b.start_date, b.end_date))
+    );
+    return days.some((d) => confirmed.has(d));
   }
 
   function onDateClick(arg: DateClickArg) {
     setMsg("");
-    const clicked = arg.dateStr; // ✅ exact calendar date clicked
+    const clicked = arg.dateStr;
 
-    // First click = check-in
     if (!checkIn) {
-      if (markers.confirmedFull.has(clicked)) {
+      if (
+        bookings.some(
+          (b) => b.status === "confirmed" && eachDay(b.start_date, b.end_date).includes(clicked)
+        )
+      ) {
         setMsg("That date is unavailable. Please choose another check-in date.");
         return;
       }
@@ -204,7 +133,6 @@ export default function AvailabilityPage() {
       return;
     }
 
-    // Second click = checkout
     if (checkIn && !checkOut) {
       if (clicked <= checkIn) {
         setMsg("Checkout must be after check-in.");
@@ -222,13 +150,7 @@ export default function AvailabilityPage() {
         return;
       }
 
-      setCheckOut(clicked); // ✅ exact clicked day becomes checkout
-      return;
-    }
-
-    // Third click resets and starts again
-    if (markers.confirmedFull.has(clicked)) {
-      setMsg("That date is unavailable. Please choose another check-in date.");
+      setCheckOut(clicked);
       return;
     }
 
@@ -252,75 +174,173 @@ export default function AvailabilityPage() {
     return nightsCount(checkIn, checkOut);
   }, [checkIn, checkOut]);
 
-  const selectionEvent = useMemo(() => {
+  const bookingEvents = useMemo(() => {
+    return bookings.map((b, idx) => ({
+      id: `public-booking-${b.id ?? idx}`,
+      title: b.status === "confirmed" ? "Booked" : "Provisional",
+      start: b.start_date,
+      end: b.end_date,
+      allDay: true,
+      display: "block" as const,
+      extendedProps: {
+        kind: "booking",
+        bookingStatus: b.status,
+      },
+    }));
+  }, [bookings]);
+
+  const selectionEvents = useMemo(() => {
     if (!checkIn) return [];
-
-    // Highlight selected nights only. If checkout chosen, highlight [checkIn, checkOut)
-    // If only check-in chosen, highlight just that day visually.
-    const end = checkOut ?? addDaysISO(checkIn, 1);
-
+    const end = checkOut ?? checkIn;
     return [
       {
-        id: "selected-range",
+        id: "selected-band",
+        title: checkOut ? "Your dates" : "Check-in selected",
         start: checkIn,
-        end,
-        display: "background" as const,
-        backgroundColor: "rgba(59,130,246,0.18)",
+        end: checkOut ?? new Date(new Date(`${checkIn}T00:00:00`).getTime() + 86400000)
+          .toISOString()
+          .slice(0, 10),
+        allDay: true,
+        display: "block" as const,
+        extendedProps: {
+          kind: "selection",
+        },
       },
     ];
   }, [checkIn, checkOut]);
 
-  function requestBooking() {
-    if (!checkIn || !checkOut) return;
+  const allEvents = useMemo(() => [...bookingEvents, ...selectionEvents], [bookingEvents, selectionEvents]);
 
-    const params = new URLSearchParams();
-    params.set("start", checkIn);
-    params.set("end", checkOut);
-
-    if (priceInfo?.ok && priceInfo.total != null) {
-      params.set("price", String(priceInfo.total));
-      params.set("price_method", String(priceInfo.method));
+  function eventClassNames(arg: any) {
+    const kind = arg.event.extendedProps?.kind;
+    if (kind === "booking") {
+      return [
+        "calendar-band",
+        "public-booking-band",
+        arg.event.extendedProps.bookingStatus === "confirmed"
+          ? "public-booking-confirmed"
+          : "public-booking-provisional",
+      ];
     }
+    if (kind === "selection") return ["calendar-band", "selection-band"];
+    return [];
+  }
 
-    window.location.href = `/book?${params.toString()}`;
+  function eventContent(arg: EventContentArg) {
+    const kind = (arg.event.extendedProps as any)?.kind;
+    if (kind === "booking") {
+      return (
+        <div className="band-inner">
+          <div className="band-title">{arg.event.title}</div>
+        </div>
+      );
+    }
+    if (kind === "selection") {
+      return (
+        <div className="band-inner">
+          <div className="band-title" style={{ color: "#1d4ed8" }}>{arg.event.title}</div>
+        </div>
+      );
+    }
+    return <div>{arg.event.title}</div>;
   }
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 18 }}>
       <style>{`
-        .fc .fc-daygrid-day.day-available .fc-daygrid-day-frame { background: rgba(34,197,94,0.10); }
-        .fc .fc-daygrid-day.day-confirmed .fc-daygrid-day-frame { background: rgba(239,68,68,0.12); }
-        .fc .fc-daygrid-day.day-provisional .fc-daygrid-day-frame { background: rgba(245,158,11,0.14); }
-
         .fc .fc-daygrid-day-frame {
           border-radius: 10px;
+          overflow: visible;
+        }
+
+        .fc .fc-daygrid-day {
+          background: #f8fafc;
+        }
+
+        .fc .fc-scrollgrid,
+        .fc .fc-scrollgrid td,
+        .fc .fc-scrollgrid th {
+          border-color: #e5e7eb;
+        }
+
+        .fc .fc-col-header-cell-cushion,
+        .fc .fc-daygrid-day-number {
+          color: #111827;
+          text-decoration: none !important;
+          font-weight: 700;
+        }
+
+        .fc .fc-daygrid-event-harness {
+          margin-top: 2px;
+        }
+
+        .fc .calendar-band {
+          border: none !important;
+          border-radius: 0 !important;
+          padding: 0 !important;
+          min-height: 22px;
+          box-shadow: none !important;
+        }
+
+        .fc .public-booking-band {
+          min-height: 22px;
+        }
+
+        .fc .public-booking-confirmed {
+          background: #f7cfd2 !important;
+        }
+
+        .fc .public-booking-provisional {
+          background: #f4d08a !important;
+        }
+
+        .fc .selection-band {
+          background: rgba(59,130,246,0.18) !important;
+        }
+
+        .fc .calendar-band.fc-event-start:not(.fc-event-end) {
+          margin-left: 50% !important;
+        }
+
+        .fc .calendar-band.fc-event-end:not(.fc-event-start) {
+          margin-right: 50% !important;
+        }
+
+        .fc .calendar-band.fc-event-start.fc-event-end {
+          margin-left: 50% !important;
+          margin-right: 50% !important;
+        }
+
+        .fc .band-inner {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          padding: 2px 4px;
           overflow: hidden;
-          position: relative;
         }
 
-        .fc .fc-daygrid-day-frame::after {
-          content: "";
-          position: absolute;
-          inset: 0;
-          pointer-events: none;
-          border-radius: 10px;
-          background: linear-gradient(
-            90deg,
-            var(--leftOverlay, transparent) 0%,
-            var(--leftOverlay, transparent) 50%,
-            var(--rightOverlay, transparent) 50%,
-            var(--rightOverlay, transparent) 100%
-          );
+        .fc .band-title {
+          font-size: 11px;
+          font-weight: 900;
+          color: #7f1d1d;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          background: rgba(255,255,255,0.3);
+          padding: 1px 4px;
+          border-radius: 4px;
+          width: fit-content;
+          max-width: 100%;
         }
 
-        .fc .fc-daygrid-day.out-confirmed { --leftOverlay: rgba(239,68,68,0.26); }
-        .fc .fc-daygrid-day.in-confirmed  { --rightOverlay: rgba(239,68,68,0.26); }
+        .fc .public-booking-provisional .band-title {
+          color: #92400e;
+        }
 
-        .fc .fc-daygrid-day.out-provisional { --leftOverlay: rgba(245,158,11,0.28); }
-        .fc .fc-daygrid-day.in-provisional  { --rightOverlay: rgba(245,158,11,0.28); }
-
-        .fc .fc-daygrid-day-top,
-        .fc .fc-daygrid-day-events { position: relative; z-index: 1; }
+        .fc .fc-daygrid-more-link {
+          color: #374151;
+          font-weight: 700;
+        }
       `}</style>
 
       <h1 style={{ margin: "0 0 6px" }}>Availability</h1>
@@ -340,8 +360,10 @@ export default function AvailabilityPage() {
             height="auto"
             selectable={false}
             dateClick={onDateClick}
-            dayCellClassNames={dayCellClassNames}
-            events={selectionEvent}
+            events={allEvents}
+            eventClassNames={eventClassNames}
+            eventContent={eventContent}
+            dayMaxEvents={4}
           />
         </div>
 
@@ -420,8 +442,27 @@ export default function AvailabilityPage() {
               {msg}
             </div>
           )}
+
+          <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
+            This creates a provisional request — not confirmed until approved.
+          </div>
         </div>
       </div>
     </div>
   );
+
+  function requestBooking() {
+    if (!checkIn || !checkOut) return;
+
+    const params = new URLSearchParams();
+    params.set("start", checkIn);
+    params.set("end", checkOut);
+
+    if (priceInfo?.ok && priceInfo.total != null) {
+      params.set("price", String(priceInfo.total));
+      params.set("price_method", String(priceInfo.method));
+    }
+
+    window.location.href = `/book?${params.toString()}`;
+  }
 }
