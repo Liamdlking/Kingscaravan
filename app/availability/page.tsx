@@ -23,13 +23,6 @@ type Rate = {
   note?: string | null;
 };
 
-function isoLocal(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 function eachDay(startISO: string, endISO: string) {
   const out: string[] = [];
   const start = new Date(`${startISO}T00:00:00Z`);
@@ -56,9 +49,9 @@ function isAllowedPattern(startISO: string, endISO: string) {
   const startDay = start.getDay();
   const endDay = end.getDay();
 
-  if (startDay === 5 && endDay === 1) return { ok: true, reason: "" }; // Fri-Mon
-  if (startDay === 1 && endDay === 5) return { ok: true, reason: "" }; // Mon-Fri
-  if (startDay === 6 && endDay === 6) return { ok: true, reason: "" }; // Sat-Sat
+  if (startDay === 5 && endDay === 1) return { ok: true, reason: "" };
+  if (startDay === 1 && endDay === 5) return { ok: true, reason: "" };
+  if (startDay === 6 && endDay === 6) return { ok: true, reason: "" };
 
   return { ok: false, reason: "Allowed stays are Fri–Mon, Mon–Fri, or Sat–Sat." };
 }
@@ -191,15 +184,16 @@ export default function AvailabilityPage() {
 
   const selectionEvents = useMemo(() => {
     if (!checkIn) return [];
-    const end = checkOut ?? checkIn;
     return [
       {
         id: "selected-band",
         title: checkOut ? "Your dates" : "Check-in selected",
         start: checkIn,
-        end: checkOut ?? new Date(new Date(`${checkIn}T00:00:00`).getTime() + 86400000)
-          .toISOString()
-          .slice(0, 10),
+        end:
+          checkOut ??
+          new Date(new Date(`${checkIn}T00:00:00`).getTime() + 86400000)
+            .toISOString()
+            .slice(0, 10),
         allDay: true,
         display: "block" as const,
         extendedProps: {
@@ -245,6 +239,21 @@ export default function AvailabilityPage() {
     return <div>{arg.event.title}</div>;
   }
 
+  function requestBooking() {
+    if (!checkIn || !checkOut) return;
+
+    const params = new URLSearchParams();
+    params.set("start", checkIn);
+    params.set("end", checkOut);
+
+    if (priceInfo?.ok && priceInfo.total != null) {
+      params.set("price", String(priceInfo.total));
+      params.set("price_method", String(priceInfo.method));
+    }
+
+    window.location.href = `/book?${params.toString()}`;
+  }
+
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 18 }}>
       <style>{`
@@ -272,6 +281,13 @@ export default function AvailabilityPage() {
 
         .fc .fc-daygrid-event-harness {
           margin-top: 2px;
+        }
+
+        .fc .fc-daygrid-event-harness .fc-h-event,
+        .fc .fc-daygrid-event-harness .calendar-band {
+          display: block !important;
+          width: 100% !important;
+          max-width: 100% !important;
         }
 
         .fc .calendar-band {
@@ -317,6 +333,8 @@ export default function AvailabilityPage() {
           gap: 2px;
           padding: 2px 4px;
           overflow: hidden;
+          width: 100%;
+          box-sizing: border-box;
         }
 
         .fc .band-title {
@@ -450,19 +468,4 @@ export default function AvailabilityPage() {
       </div>
     </div>
   );
-
-  function requestBooking() {
-    if (!checkIn || !checkOut) return;
-
-    const params = new URLSearchParams();
-    params.set("start", checkIn);
-    params.set("end", checkOut);
-
-    if (priceInfo?.ok && priceInfo.total != null) {
-      params.set("price", String(priceInfo.total));
-      params.set("price_method", String(priceInfo.method));
-    }
-
-    window.location.href = `/book?${params.toString()}`;
-  }
 }
