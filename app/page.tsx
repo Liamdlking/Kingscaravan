@@ -4,7 +4,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import type { DateSelectArg, EventClickArg, EventContentArg } from "@fullcalendar/core";
+import type {
+  DateSelectArg,
+  EventClickArg,
+  EventContentArg,
+} from "@fullcalendar/core";
 
 type Booking = {
   id: string;
@@ -39,8 +43,20 @@ type Rate = {
 };
 
 type Editor =
-  | { type: "booking"; booking: Booking; draft: Partial<Booking>; saving?: boolean; err?: string }
-  | { type: "rate"; rate: Rate; draft: Partial<Rate>; saving?: boolean; err?: string }
+  | {
+      type: "booking";
+      booking: Booking;
+      draft: Partial<Booking>;
+      saving?: boolean;
+      err?: string;
+    }
+  | {
+      type: "rate";
+      rate: Rate;
+      draft: Partial<Rate>;
+      saving?: boolean;
+      err?: string;
+    }
   | null;
 
 function isoLocal(d: Date) {
@@ -66,7 +82,10 @@ function fmtRange(start: string, end: string) {
 
 function calcBookingPrice(startISO: string, endISO: string, rates: Rate[]) {
   const exactTotal = rates.find(
-    (r) => r.rate_type === "total" && r.start_date === startISO && r.end_date === endISO
+    (r) =>
+      r.rate_type === "total" &&
+      r.start_date === startISO &&
+      r.end_date === endISO
   );
   if (exactTotal) {
     return { ok: true as const, total: Number(exactTotal.price), method: "total" as const };
@@ -77,7 +96,10 @@ function calcBookingPrice(startISO: string, endISO: string, rates: Rate[]) {
 
   for (const day of nights) {
     const nightly = rates.find(
-      (r) => r.rate_type === "nightly" && r.start_date <= day && day < r.end_date
+      (r) =>
+        r.rate_type === "nightly" &&
+        r.start_date <= day &&
+        day < r.end_date
     );
     if (!nightly) return { ok: false as const, total: null, method: "missing" as const };
     total += Number(nightly.price);
@@ -86,7 +108,13 @@ function calcBookingPrice(startISO: string, endISO: string, rates: Rate[]) {
   return { ok: true as const, total, method: "nightly" as const };
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <label style={{ display: "grid", gap: 6, marginTop: 10 }}>
       <span style={{ fontSize: 12, opacity: 0.75 }}>{label}</span>
@@ -104,7 +132,10 @@ export default function Dashboard() {
 
   async function loadAll() {
     setLoading(true);
-    const [bRes, rRes] = await Promise.all([fetch("/api/bookings"), fetch("/api/rates")]);
+    const [bRes, rRes] = await Promise.all([
+      fetch("/api/bookings"),
+      fetch("/api/rates"),
+    ]);
     const [bJson, rJson] = await Promise.all([bRes.json(), rRes.json()]);
     setBookings(bJson.bookings ?? []);
     setRates(rJson.rates ?? []);
@@ -137,14 +168,29 @@ export default function Dashboard() {
       }
       await loadAll();
       const created: Booking | undefined = json.booking;
-      if (created?.id) setEditor({ type: "booking", booking: created, draft: { ...created } });
+      if (created?.id) {
+        setEditor({ type: "booking", booking: created, draft: { ...created } });
+      }
       return;
     }
 
     setEditor({
       type: "rate",
-      rate: { id: "", start_date, end_date, price: 0, rate_type: "total", note: null },
-      draft: { start_date, end_date, price: 0, rate_type: "total", note: "" },
+      rate: {
+        id: "",
+        start_date,
+        end_date,
+        price: 0,
+        rate_type: "total",
+        note: null,
+      },
+      draft: {
+        start_date,
+        end_date,
+        price: 0,
+        rate_type: "total",
+        note: "",
+      },
     });
   }
 
@@ -195,7 +241,11 @@ export default function Dashboard() {
 
     const json = await res.json();
     if (!res.ok) {
-      setEditor({ ...editor, saving: false, err: json?.error || "Could not save booking" });
+      setEditor({
+        ...editor,
+        saving: false,
+        err: json?.error || "Could not save booking",
+      });
       return;
     }
 
@@ -205,7 +255,9 @@ export default function Dashboard() {
 
   async function deleteBooking(id: string) {
     if (!confirm("Delete this booking?")) return;
-    await fetch(`/api/bookings?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    await fetch(`/api/bookings?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
     setEditor(null);
     await loadAll();
   }
@@ -231,18 +283,30 @@ export default function Dashboard() {
     setEditor({ ...editor, saving: true, err: "" });
 
     if (editor.rate.id) {
-      await fetch(`/api/rates?id=${encodeURIComponent(editor.rate.id)}`, { method: "DELETE" });
+      await fetch(`/api/rates?id=${encodeURIComponent(editor.rate.id)}`, {
+        method: "DELETE",
+      });
     }
 
     const res = await fetch("/api/rates", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ start_date, end_date, price, rate_type, note: note || null }),
+      body: JSON.stringify({
+        start_date,
+        end_date,
+        price,
+        rate_type,
+        note: note || null,
+      }),
     });
 
     const json = await res.json();
     if (!res.ok) {
-      setEditor({ ...editor, saving: false, err: json?.error || "Could not save rate" });
+      setEditor({
+        ...editor,
+        saving: false,
+        err: json?.error || "Could not save rate",
+      });
       return;
     }
 
@@ -252,10 +316,35 @@ export default function Dashboard() {
 
   async function deleteRate(id: string) {
     if (!confirm("Delete this price block?")) return;
-    await fetch(`/api/rates?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    await fetch(`/api/rates?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
     setEditor(null);
     await loadAll();
   }
+
+  const checkoutMarkers = useMemo(() => {
+    const outConfirmed = new Set<string>();
+    const outProvisional = new Set<string>();
+
+    for (const b of bookings) {
+      const status = (b.status ?? "confirmed") as "confirmed" | "provisional";
+      if (status === "confirmed") outConfirmed.add(b.end_date);
+      else outProvisional.add(b.end_date);
+    }
+
+    return { outConfirmed, outProvisional };
+  }, [bookings]);
+
+  const dayCellClassNames = (info: any) => {
+    const d = info.date.toISOString().slice(0, 10);
+    const classes: string[] = [];
+
+    if (checkoutMarkers.outConfirmed.has(d)) classes.push("checkout-confirmed");
+    if (checkoutMarkers.outProvisional.has(d)) classes.push("checkout-provisional");
+
+    return classes;
+  };
 
   const bookingEvents = useMemo(() => {
     return bookings.map((b) => {
@@ -293,7 +382,10 @@ export default function Dashboard() {
     }));
   }, [rates]);
 
-  const allEvents = useMemo(() => [...rateEvents, ...bookingEvents], [rateEvents, bookingEvents]);
+  const allEvents = useMemo(
+    () => [...rateEvents, ...bookingEvents],
+    [rateEvents, bookingEvents]
+  );
 
   function eventClassNames(arg: any) {
     const ext = arg.event.extendedProps || {};
@@ -356,6 +448,7 @@ export default function Dashboard() {
         .fc .fc-daygrid-day-frame {
           border-radius: 10px;
           overflow: visible;
+          position: relative;
         }
 
         .fc .fc-daygrid-day {
@@ -373,10 +466,41 @@ export default function Dashboard() {
           color: #111827;
           text-decoration: none !important;
           font-weight: 700;
+          position: relative;
+          z-index: 3;
+        }
+
+        .fc .fc-daygrid-day.checkout-confirmed .fc-daygrid-day-frame::after,
+        .fc .fc-daygrid-day.checkout-provisional .fc-daygrid-day-frame::after {
+          content: "";
+          position: absolute;
+          left: 0;
+          top: 22px;
+          bottom: 2px;
+          width: 50%;
+          pointer-events: none;
+          z-index: 1;
+          box-sizing: border-box;
+        }
+
+        .fc .fc-daygrid-day.checkout-confirmed .fc-daygrid-day-frame::after {
+          background: #f7cfd2;
+          border-left: 1px solid #111;
+          border-top: 1px solid #111;
+          border-bottom: 1px solid #111;
+        }
+
+        .fc .fc-daygrid-day.checkout-provisional .fc-daygrid-day-frame::after {
+          background: #f4d08a;
+          border-left: 1px solid #111;
+          border-top: 1px solid #111;
+          border-bottom: 1px solid #111;
         }
 
         .fc .fc-daygrid-event-harness {
           margin-top: 2px;
+          position: relative;
+          z-index: 2;
         }
 
         .fc .fc-daygrid-event-harness .fc-h-event,
@@ -387,20 +511,22 @@ export default function Dashboard() {
         }
 
         .fc .calendar-band {
-          border: none !important;
           border-radius: 0 !important;
           padding: 0 !important;
           min-height: 22px;
           box-shadow: none !important;
+          box-sizing: border-box;
         }
 
         .fc .calendar-band.booking-band {
           min-height: 34px;
+          border: 1px solid #111 !important;
         }
 
         .fc .calendar-band.rate-band {
           min-height: 18px;
-          opacity: 0.9;
+          opacity: 0.95;
+          border: 1px solid rgba(0,0,0,0.12) !important;
         }
 
         .fc .booking-confirmed {
@@ -417,19 +543,16 @@ export default function Dashboard() {
 
         .fc .calendar-band.fc-event-start:not(.fc-event-end) {
           margin-left: 50% !important;
-          border-top-left-radius: 0 !important;
-          border-bottom-left-radius: 0 !important;
+          border-left-width: 1px !important;
         }
 
         .fc .calendar-band.fc-event-end:not(.fc-event-start) {
-          margin-right: 50% !important;
-          border-top-right-radius: 0 !important;
-          border-bottom-right-radius: 0 !important;
+          margin-right: 0 !important;
         }
 
         .fc .calendar-band.fc-event-start.fc-event-end {
           margin-left: 50% !important;
-          margin-right: 50% !important;
+          margin-right: 0 !important;
         }
 
         .fc .band-inner {
@@ -492,10 +615,16 @@ export default function Dashboard() {
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setMode("bookings")} style={{ ...styles.tab, ...(mode === "bookings" ? styles.tabOn : {}) }}>
+          <button
+            onClick={() => setMode("bookings")}
+            style={{ ...styles.tab, ...(mode === "bookings" ? styles.tabOn : {}) }}
+          >
             Bookings
           </button>
-          <button onClick={() => setMode("pricing")} style={{ ...styles.tab, ...(mode === "pricing" ? styles.tabOn : {}) }}>
+          <button
+            onClick={() => setMode("pricing")}
+            style={{ ...styles.tab, ...(mode === "pricing" ? styles.tabOn : {}) }}
+          >
             Pricing
           </button>
           <button onClick={loadAll} style={styles.tab}>
@@ -521,6 +650,7 @@ export default function Dashboard() {
                 events={allEvents}
                 eventClassNames={eventClassNames}
                 eventContent={eventContent}
+                dayCellClassNames={dayCellClassNames}
                 dayMaxEvents={4}
                 height="auto"
               />
@@ -528,7 +658,14 @@ export default function Dashboard() {
           </div>
 
           <div style={styles.card}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
               <h2 style={{ margin: 0, fontSize: 16 }}>Bookings (quick view)</h2>
               <div style={{ fontSize: 12, opacity: 0.7 }}>{upcoming.length} total</div>
             </div>
@@ -541,8 +678,18 @@ export default function Dashboard() {
                   const status = (b.status ?? "confirmed") as "confirmed" | "provisional";
                   const pill =
                     status === "confirmed"
-                      ? { bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.35)", text: "#b91c1c", label: "Confirmed" }
-                      : { bg: "rgba(245,158,11,0.14)", border: "rgba(245,158,11,0.4)", text: "#92400e", label: "Provisional" };
+                      ? {
+                          bg: "rgba(239,68,68,0.12)",
+                          border: "rgba(239,68,68,0.35)",
+                          text: "#b91c1c",
+                          label: "Confirmed",
+                        }
+                      : {
+                          bg: "rgba(245,158,11,0.14)",
+                          border: "rgba(245,158,11,0.4)",
+                          text: "#92400e",
+                          label: "Provisional",
+                        };
 
                   const price = bookingPriceMap.get(b.id);
                   const priceBadge =
@@ -553,7 +700,9 @@ export default function Dashboard() {
                   return (
                     <button
                       key={b.id}
-                      onClick={() => setEditor({ type: "booking", booking: b, draft: { ...b } })}
+                      onClick={() =>
+                        setEditor({ type: "booking", booking: b, draft: { ...b } })
+                      }
                       style={{
                         textAlign: "left",
                         width: "100%",
@@ -564,10 +713,21 @@ export default function Dashboard() {
                         cursor: "pointer",
                       }}
                     >
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: 10,
+                          alignItems: "flex-start",
+                        }}
+                      >
                         <div>
-                          <div style={{ fontWeight: 900, marginBottom: 2 }}>{b.guest_name || "Booking"}</div>
-                          <div style={{ fontSize: 13, opacity: 0.75 }}>{fmtRange(b.start_date, b.end_date)}</div>
+                          <div style={{ fontWeight: 900, marginBottom: 2 }}>
+                            {b.guest_name || "Booking"}
+                          </div>
+                          <div style={{ fontSize: 13, opacity: 0.75 }}>
+                            {fmtRange(b.start_date, b.end_date)}
+                          </div>
                         </div>
 
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -577,8 +737,14 @@ export default function Dashboard() {
                               fontWeight: 900,
                               padding: "6px 10px",
                               borderRadius: 999,
-                              border: `1px solid ${priceBadge.ok ? "rgba(34,197,94,0.45)" : "rgba(0,0,0,0.12)"}`,
-                              background: priceBadge.ok ? "rgba(34,197,94,0.12)" : "rgba(0,0,0,0.04)",
+                              border: `1px solid ${
+                                priceBadge.ok
+                                  ? "rgba(34,197,94,0.45)"
+                                  : "rgba(0,0,0,0.12)"
+                              }`,
+                              background: priceBadge.ok
+                                ? "rgba(34,197,94,0.12)"
+                                : "rgba(0,0,0,0.04)",
                               color: priceBadge.ok ? "#14532d" : "rgba(0,0,0,0.55)",
                               whiteSpace: "nowrap",
                             }}
@@ -603,9 +769,22 @@ export default function Dashboard() {
                         </div>
                       </div>
 
-                      <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, opacity: 0.8 }}>
-                        {typeof b.guests_count === "number" && <span>👤 Guests: {b.guests_count}</span>}
-                        {typeof b.dogs_count === "number" && <span>🐶 Dogs: {b.dogs_count}</span>}
+                      <div
+                        style={{
+                          marginTop: 10,
+                          display: "flex",
+                          gap: 10,
+                          flexWrap: "wrap",
+                          fontSize: 12,
+                          opacity: 0.8,
+                        }}
+                      >
+                        {typeof b.guests_count === "number" && (
+                          <span>👤 Guests: {b.guests_count}</span>
+                        )}
+                        {typeof b.dogs_count === "number" && (
+                          <span>🐶 Dogs: {b.dogs_count}</span>
+                        )}
                         {b.phone && <span>📞 {b.phone}</span>}
                         {b.guest_email && <span>✉️ {b.guest_email}</span>}
                       </div>
@@ -622,7 +801,11 @@ export default function Dashboard() {
             {editor?.type === "rate" ? "Price editor" : "Booking editor"}
           </div>
 
-          {!editor && <div style={{ opacity: 0.75, fontSize: 13 }}>Click a booking or price block to edit it.</div>}
+          {!editor && (
+            <div style={{ opacity: 0.75, fontSize: 13 }}>
+              Click a booking or price block to edit it.
+            </div>
+          )}
 
           {editor?.type === "rate" && (
             <>
@@ -631,7 +814,12 @@ export default function Dashboard() {
                   style={styles.input}
                   type="date"
                   value={String(editor.draft.start_date ?? editor.rate.start_date ?? "")}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, start_date: e.target.value } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, start_date: e.target.value },
+                    })
+                  }
                 />
               </Field>
 
@@ -640,7 +828,12 @@ export default function Dashboard() {
                   style={styles.input}
                   type="date"
                   value={String(editor.draft.end_date ?? editor.rate.end_date ?? "")}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, end_date: e.target.value } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, end_date: e.target.value },
+                    })
+                  }
                 />
               </Field>
 
@@ -648,7 +841,15 @@ export default function Dashboard() {
                 <select
                   style={styles.input}
                   value={String(editor.draft.rate_type ?? editor.rate.rate_type ?? "total")}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, rate_type: e.target.value as any } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: {
+                        ...editor.draft,
+                        rate_type: e.target.value as "nightly" | "total",
+                      },
+                    })
+                  }
                 >
                   <option value="total">Total</option>
                   <option value="nightly">Nightly</option>
@@ -661,7 +862,12 @@ export default function Dashboard() {
                   type="number"
                   min={0}
                   value={Number(editor.draft.price ?? editor.rate.price ?? 0)}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, price: Number(e.target.value) } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, price: Number(e.target.value) },
+                    })
+                  }
                 />
               </Field>
 
@@ -669,23 +875,40 @@ export default function Dashboard() {
                 <input
                   style={styles.input}
                   value={String(editor.draft.note ?? editor.rate.note ?? "")}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, note: e.target.value } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, note: e.target.value },
+                    })
+                  }
                 />
               </Field>
 
               {editor.err && <div style={styles.err}>{editor.err}</div>}
 
               <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <button style={styles.primaryBtn} onClick={saveRate} disabled={editor.saving}>
+                <button
+                  style={styles.primaryBtn}
+                  onClick={saveRate}
+                  disabled={editor.saving}
+                >
                   {editor.saving ? "Saving…" : "Save price"}
                 </button>
 
                 {editor.rate.id ? (
-                  <button style={styles.dangerBtn} onClick={() => deleteRate(editor.rate.id)} disabled={editor.saving}>
+                  <button
+                    style={styles.dangerBtn}
+                    onClick={() => deleteRate(editor.rate.id)}
+                    disabled={editor.saving}
+                  >
                     Delete
                   </button>
                 ) : (
-                  <button style={styles.subBtn} onClick={() => setEditor(null)} disabled={editor.saving}>
+                  <button
+                    style={styles.subBtn}
+                    onClick={() => setEditor(null)}
+                    disabled={editor.saving}
+                  >
                     Cancel
                   </button>
                 )}
@@ -700,7 +923,12 @@ export default function Dashboard() {
                   style={styles.input}
                   type="date"
                   value={String(editor.draft.start_date ?? "")}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, start_date: e.target.value } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, start_date: e.target.value },
+                    })
+                  }
                 />
               </Field>
 
@@ -709,7 +937,12 @@ export default function Dashboard() {
                   style={styles.input}
                   type="date"
                   value={String(editor.draft.end_date ?? "")}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, end_date: e.target.value } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, end_date: e.target.value },
+                    })
+                  }
                 />
               </Field>
 
@@ -717,7 +950,15 @@ export default function Dashboard() {
                 <select
                   style={styles.input}
                   value={String(editor.draft.status ?? "provisional")}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, status: e.target.value as any } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: {
+                        ...editor.draft,
+                        status: e.target.value as "provisional" | "confirmed",
+                      },
+                    })
+                  }
                 >
                   <option value="provisional">Provisional</option>
                   <option value="confirmed">Confirmed</option>
@@ -730,7 +971,12 @@ export default function Dashboard() {
                 <input
                   style={styles.input}
                   value={String(editor.draft.guest_name ?? "")}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, guest_name: e.target.value } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, guest_name: e.target.value },
+                    })
+                  }
                 />
               </Field>
 
@@ -738,7 +984,12 @@ export default function Dashboard() {
                 <input
                   style={styles.input}
                   value={String(editor.draft.guest_email ?? "")}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, guest_email: e.target.value } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, guest_email: e.target.value },
+                    })
+                  }
                 />
               </Field>
 
@@ -746,7 +997,12 @@ export default function Dashboard() {
                 <input
                   style={styles.input}
                   value={String(editor.draft.phone ?? "")}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, phone: e.target.value } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, phone: e.target.value },
+                    })
+                  }
                 />
               </Field>
 
@@ -757,7 +1013,15 @@ export default function Dashboard() {
                   min={1}
                   max={8}
                   value={Number(editor.draft.guests_count ?? 0)}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, guests_count: Number(e.target.value) } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: {
+                        ...editor.draft,
+                        guests_count: Number(e.target.value),
+                      },
+                    })
+                  }
                 />
               </Field>
 
@@ -768,7 +1032,15 @@ export default function Dashboard() {
                   min={0}
                   max={8}
                   value={Number(editor.draft.children_count ?? 0)}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, children_count: Number(e.target.value) } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: {
+                        ...editor.draft,
+                        children_count: Number(e.target.value),
+                      },
+                    })
+                  }
                 />
               </Field>
 
@@ -779,7 +1051,15 @@ export default function Dashboard() {
                   min={0}
                   max={5}
                   value={Number(editor.draft.dogs_count ?? 0)}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, dogs_count: Number(e.target.value) } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: {
+                        ...editor.draft,
+                        dogs_count: Number(e.target.value),
+                      },
+                    })
+                  }
                 />
               </Field>
 
@@ -787,7 +1067,12 @@ export default function Dashboard() {
                 <input
                   style={styles.input}
                   value={String(editor.draft.vehicle_reg ?? "")}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, vehicle_reg: e.target.value } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, vehicle_reg: e.target.value },
+                    })
+                  }
                 />
               </Field>
 
@@ -795,7 +1080,15 @@ export default function Dashboard() {
                 <textarea
                   style={{ ...styles.input, minHeight: 80, resize: "vertical" }}
                   value={String(editor.draft.special_requests ?? "")}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, special_requests: e.target.value } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: {
+                        ...editor.draft,
+                        special_requests: e.target.value,
+                      },
+                    })
+                  }
                 />
               </Field>
 
@@ -803,17 +1096,30 @@ export default function Dashboard() {
                 <textarea
                   style={{ ...styles.input, minHeight: 70, resize: "vertical" }}
                   value={String(editor.draft.notes ?? "")}
-                  onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, notes: e.target.value } })}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, notes: e.target.value },
+                    })
+                  }
                 />
               </Field>
 
               {editor.err && <div style={styles.err}>{editor.err}</div>}
 
               <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <button style={styles.primaryBtn} onClick={saveBooking} disabled={editor.saving}>
+                <button
+                  style={styles.primaryBtn}
+                  onClick={saveBooking}
+                  disabled={editor.saving}
+                >
                   {editor.saving ? "Saving…" : "Save changes"}
                 </button>
-                <button style={styles.dangerBtn} onClick={() => deleteBooking(editor.booking.id)} disabled={editor.saving}>
+                <button
+                  style={styles.dangerBtn}
+                  onClick={() => deleteBooking(editor.booking.id)}
+                  disabled={editor.saving}
+                >
                   Delete
                 </button>
               </div>
