@@ -15,21 +15,16 @@ type Booking = {
   start_date: string;
   end_date: string; // checkout day
   status?: "provisional" | "confirmed" | null;
-
   guest_name: string | null;
   guest_email?: string | null;
   phone?: string | null;
-
   contact?: string | null;
   notes?: string | null;
-
   guests_count?: number | null;
   children_count?: number | null;
   dogs_count?: number | null;
-
   vehicle_reg?: string | null;
   special_requests?: string | null;
-
   created_at?: string;
 };
 
@@ -68,10 +63,10 @@ function isoLocal(d: Date) {
 
 function eachDay(startISO: string, endISO: string) {
   const out: string[] = [];
-  const start = new Date(`${startISO}T00:00:00Z`);
-  const end = new Date(`${endISO}T00:00:00Z`);
-  for (let d = new Date(start); d < end; d.setUTCDate(d.getUTCDate() + 1)) {
-    out.push(d.toISOString().slice(0, 10));
+  const start = new Date(`${startISO}T00:00:00`);
+  const end = new Date(`${endISO}T00:00:00`);
+  for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
+    out.push(isoLocal(d));
   }
   return out;
 }
@@ -196,12 +191,10 @@ export default function Dashboard() {
 
   function onEventClick(arg: EventClickArg) {
     const ext = arg.event.extendedProps as any;
-
     if (ext.kind === "booking") {
       setEditor({ type: "booking", booking: ext.booking, draft: { ...ext.booking } });
       return;
     }
-
     if (ext.kind === "rate") {
       setEditor({ type: "rate", rate: ext.rate, draft: { ...ext.rate } });
     }
@@ -323,40 +316,69 @@ export default function Dashboard() {
     await loadAll();
   }
 
-  const checkoutMarkers = useMemo(() => {
-    const outConfirmed = new Set<string>();
-    const outProvisional = new Set<string>();
+  const bookingStyleMap = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        status: "confirmed" | "provisional";
+        isStart: boolean;
+        isMiddle: boolean;
+        isCheckout: boolean;
+      }
+    >();
 
     for (const b of bookings) {
       const status = (b.status ?? "confirmed") as "confirmed" | "provisional";
-      if (status === "confirmed") outConfirmed.add(b.end_date);
-      else outProvisional.add(b.end_date);
+      const bookedDays = eachDay(b.start_date, b.end_date);
+
+      bookedDays.forEach((day, index) => {
+        map.set(day, {
+          status,
+          isStart: index === 0,
+          isMiddle: index > 0,
+          isCheckout: false,
+        });
+      });
+
+      map.set(b.end_date, {
+        status,
+        isStart: false,
+        isMiddle: false,
+        isCheckout: true,
+      });
     }
 
-    return { outConfirmed, outProvisional };
+    return map;
   }, [bookings]);
 
   const dayCellClassNames = (info: any) => {
-    const d = info.date.toISOString().slice(0, 10);
+    const d = isoLocal(info.date);
+    const style = bookingStyleMap.get(d);
     const classes: string[] = [];
 
-    if (checkoutMarkers.outConfirmed.has(d)) classes.push("checkout-confirmed");
-    if (checkoutMarkers.outProvisional.has(d)) classes.push("checkout-provisional");
+    if (!style) return classes;
+
+    if (style.status === "confirmed") classes.push("day-booked-confirmed");
+    else classes.push("day-booked-provisional");
+
+    if (style.isStart) classes.push("day-booking-start");
+    if (style.isMiddle) classes.push("day-booking-middle");
+    if (style.isCheckout) classes.push("day-booking-checkout");
 
     return classes;
   };
 
-  const bookingEvents = useMemo(() => {
+  const bookingLabelEvents = useMemo(() => {
     return bookings.map((b) => {
       const price = calcBookingPrice(b.start_date, b.end_date, rates);
       const status = (b.status ?? "confirmed") as "confirmed" | "provisional";
       return {
-        id: `booking-${b.id}`,
+        id: `booking-label-${b.id}`,
         title: b.guest_name ?? "Booking",
         start: b.start_date,
-        end: b.end_date,
+        end: b.start_date,
         allDay: true,
-        display: "block" as const,
+        display: "list-item" as const,
         extendedProps: {
           kind: "booking",
           booking: b,
@@ -367,14 +389,14 @@ export default function Dashboard() {
     });
   }, [bookings, rates]);
 
-  const rateEvents = useMemo(() => {
+  const rateLabelEvents = useMemo(() => {
     return rates.map((r) => ({
-      id: `rate-${r.id}`,
+      id: `rate-label-${r.id}`,
       title: r.rate_type === "nightly" ? `£${r.price}/night` : `£${r.price} total`,
       start: r.start_date,
-      end: r.end_date,
+      end: r.start_date,
       allDay: true,
-      display: "block" as const,
+      display: "list-item" as const,
       extendedProps: {
         kind: "rate",
         rate: r,
@@ -383,23 +405,14 @@ export default function Dashboard() {
   }, [rates]);
 
   const allEvents = useMemo(
-    () => [...rateEvents, ...bookingEvents],
-    [rateEvents, bookingEvents]
+    () => [...rateLabelEvents, ...bookingLabelEvents],
+    [rateLabelEvents, bookingLabelEvents]
   );
 
   function eventClassNames(arg: any) {
     const ext = arg.event.extendedProps || {};
-    if (ext.kind === "booking") {
-      const status = ext.bookingStatus as "confirmed" | "provisional";
-      return [
-        "calendar-band",
-        "booking-band",
-        status === "confirmed" ? "booking-confirmed" : "booking-provisional",
-      ];
-    }
-    if (ext.kind === "rate") {
-      return ["calendar-band", "rate-band"];
-    }
+    if (ext.kind === "booking") return ["booking-label"];
+    if (ext.kind === "rate") return ["rate-label"];
     return [];
   }
 
@@ -409,19 +422,15 @@ export default function Dashboard() {
     if (ext.kind === "booking") {
       const price = ext.bookingPrice;
       return (
-        <div className="band-inner">
-          {price != null && <div className="band-price">£{price} total</div>}
-          <div className="band-title">{arg.event.title}</div>
+        <div className="label-stack">
+          {price != null && <div className="label-rate">£{price} total</div>}
+          <div className="label-booking">{arg.event.title}</div>
         </div>
       );
     }
 
     if (ext.kind === "rate") {
-      return (
-        <div className="band-inner">
-          <div className="band-rate">{arg.event.title}</div>
-        </div>
-      );
+      return <div className="label-rate">{arg.event.title}</div>;
     }
 
     return <div>{arg.event.title}</div>;
@@ -449,6 +458,7 @@ export default function Dashboard() {
           border-radius: 10px;
           overflow: visible;
           position: relative;
+          min-height: 88px;
         }
 
         .fc .fc-daygrid-day {
@@ -470,132 +480,110 @@ export default function Dashboard() {
           z-index: 3;
         }
 
-        .fc .fc-daygrid-day.checkout-confirmed .fc-daygrid-day-frame::after,
-        .fc .fc-daygrid-day.checkout-provisional .fc-daygrid-day-frame::after {
-          content: "";
-          position: absolute;
-          left: 0;
-          top: 22px;
-          bottom: 2px;
-          width: 50%;
-          pointer-events: none;
-          z-index: 1;
+        .fc .fc-daygrid-day.day-booked-confirmed .fc-daygrid-day-frame,
+        .fc .fc-daygrid-day.day-booked-provisional .fc-daygrid-day-frame {
           box-sizing: border-box;
         }
 
-        .fc .fc-daygrid-day.checkout-confirmed .fc-daygrid-day-frame::after {
-          background: #f7cfd2;
-          border-left: 1px solid #111;
-          border-top: 1px solid #111;
-          border-bottom: 1px solid #111;
+        .fc .fc-daygrid-day.day-booked-confirmed.day-booking-start .fc-daygrid-day-frame {
+          background:
+            linear-gradient(to right, transparent 0 50%, #f7cfd2 50% 100%);
+          box-shadow:
+            inset -1px 0 0 #111,
+            inset 0 1px 0 #111,
+            inset 0 -1px 0 #111;
         }
 
-        .fc .fc-daygrid-day.checkout-provisional .fc-daygrid-day-frame::after {
+        .fc .fc-daygrid-day.day-booked-provisional.day-booking-start .fc-daygrid-day-frame {
+          background:
+            linear-gradient(to right, transparent 0 50%, #f4d08a 50% 100%);
+          box-shadow:
+            inset -1px 0 0 #111,
+            inset 0 1px 0 #111,
+            inset 0 -1px 0 #111;
+        }
+
+        .fc .fc-daygrid-day.day-booked-confirmed.day-booking-middle .fc-daygrid-day-frame {
+          background: #f7cfd2;
+          box-shadow:
+            inset 0 1px 0 #111,
+            inset 0 -1px 0 #111,
+            inset -1px 0 0 #111;
+        }
+
+        .fc .fc-daygrid-day.day-booked-provisional.day-booking-middle .fc-daygrid-day-frame {
           background: #f4d08a;
-          border-left: 1px solid #111;
-          border-top: 1px solid #111;
-          border-bottom: 1px solid #111;
+          box-shadow:
+            inset 0 1px 0 #111,
+            inset 0 -1px 0 #111,
+            inset -1px 0 0 #111;
+        }
+
+        .fc .fc-daygrid-day.day-booked-confirmed.day-booking-checkout .fc-daygrid-day-frame {
+          background:
+            linear-gradient(to right, #f7cfd2 0 50%, transparent 50% 100%);
+          box-shadow:
+            inset 1px 0 0 #111,
+            inset 0 1px 0 #111,
+            inset 0 -1px 0 #111;
+        }
+
+        .fc .fc-daygrid-day.day-booked-provisional.day-booking-checkout .fc-daygrid-day-frame {
+          background:
+            linear-gradient(to right, #f4d08a 0 50%, transparent 50% 100%);
+          box-shadow:
+            inset 1px 0 0 #111,
+            inset 0 1px 0 #111,
+            inset 0 -1px 0 #111;
         }
 
         .fc .fc-daygrid-event-harness {
-          margin-top: 2px;
+          margin-top: 4px;
           position: relative;
-          z-index: 2;
+          z-index: 4;
         }
 
-        .fc .fc-daygrid-event-harness .fc-h-event,
-        .fc .fc-daygrid-event-harness .calendar-band {
-          display: block !important;
-          width: 100% !important;
-          max-width: 100% !important;
-        }
-
-        .fc .calendar-band {
-          border-radius: 0 !important;
-          padding: 0 !important;
-          min-height: 22px;
+        .fc .fc-daygrid-event {
+          border: none !important;
+          background: transparent !important;
           box-shadow: none !important;
-          box-sizing: border-box;
+          padding: 0 !important;
+          margin: 0 !important;
         }
 
-        .fc .calendar-band.booking-band {
-          min-height: 34px;
-          border: 1px solid #111 !important;
-        }
-
-        .fc .calendar-band.rate-band {
-          min-height: 18px;
-          opacity: 0.95;
-          border: 1px solid rgba(0,0,0,0.12) !important;
-        }
-
-        .fc .booking-confirmed {
-          background: #f7cfd2 !important;
-        }
-
-        .fc .booking-provisional {
-          background: #f4d08a !important;
-        }
-
-        .fc .rate-band {
-          background: #cfeecf !important;
-        }
-
-        .fc .calendar-band.fc-event-start:not(.fc-event-end) {
-          margin-left: 50% !important;
-          border-left-width: 1px !important;
-        }
-
-        .fc .calendar-band.fc-event-end:not(.fc-event-start) {
-          margin-right: 0 !important;
-        }
-
-        .fc .calendar-band.fc-event-start.fc-event-end {
-          margin-left: 50% !important;
-          margin-right: 0 !important;
-        }
-
-        .fc .band-inner {
+        .label-stack {
           display: flex;
           flex-direction: column;
           gap: 2px;
-          padding: 2px 4px;
-          overflow: hidden;
-          width: 100%;
-          box-sizing: border-box;
         }
 
-        .fc .band-price,
-        .fc .band-rate {
+        .label-rate {
           font-size: 11px;
           font-weight: 800;
           color: #1f2937;
+          background: #cfeecf;
+          border: 1px solid rgba(0,0,0,0.12);
+          padding: 2px 4px;
+          border-radius: 3px;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          background: rgba(255,255,255,0.35);
-          padding: 1px 4px;
-          border-radius: 4px;
           width: fit-content;
           max-width: 100%;
         }
 
-        .fc .band-title {
+        .label-booking {
           font-size: 12px;
           font-weight: 900;
           color: #7f1d1d;
+          background: rgba(255,255,255,0.3);
+          padding: 2px 4px;
+          border-radius: 3px;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          background: rgba(255,255,255,0.22);
-          padding: 1px 4px;
-          border-radius: 4px;
           width: fit-content;
           max-width: 100%;
-        }
-
-        .fc .booking-provisional .band-title {
-          color: #92400e;
         }
 
         .fc .fc-daygrid-more-link {
@@ -651,7 +639,7 @@ export default function Dashboard() {
                 eventClassNames={eventClassNames}
                 eventContent={eventContent}
                 dayCellClassNames={dayCellClassNames}
-                dayMaxEvents={4}
+                dayMaxEvents={3}
                 height="auto"
               />
             )}
