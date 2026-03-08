@@ -58,7 +58,10 @@ function isAllowedPattern(startISO: string, endISO: string) {
 
 function calcPrice(startISO: string, endISO: string, rates: Rate[]) {
   const exactTotal = rates.find(
-    (r) => r.rate_type === "total" && r.start_date === startISO && r.end_date === endISO
+    (r) =>
+      r.rate_type === "total" &&
+      r.start_date === startISO &&
+      r.end_date === endISO
   );
   if (exactTotal) {
     return { ok: true as const, total: Number(exactTotal.price), method: "total" as const };
@@ -69,7 +72,10 @@ function calcPrice(startISO: string, endISO: string, rates: Rate[]) {
 
   for (const day of nights) {
     const nightly = rates.find(
-      (r) => r.rate_type === "nightly" && r.start_date <= day && day < r.end_date
+      (r) =>
+        r.rate_type === "nightly" &&
+        r.start_date <= day &&
+        day < r.end_date
     );
     if (!nightly) return { ok: false as const, total: null, method: "missing" as const };
     total += Number(nightly.price);
@@ -98,6 +104,18 @@ export default function AvailabilityPage() {
     })();
   }, []);
 
+  const checkoutMarkers = useMemo(() => {
+    const outConfirmed = new Set<string>();
+    const outProvisional = new Set<string>();
+
+    for (const b of bookings) {
+      if (b.status === "confirmed") outConfirmed.add(b.end_date);
+      else outProvisional.add(b.end_date);
+    }
+
+    return { outConfirmed, outProvisional };
+  }, [bookings]);
+
   function selectionHasConfirmed(startISO: string, endISO: string) {
     const days = eachDay(startISO, endISO);
     const confirmed = new Set(
@@ -115,7 +133,9 @@ export default function AvailabilityPage() {
     if (!checkIn) {
       if (
         bookings.some(
-          (b) => b.status === "confirmed" && eachDay(b.start_date, b.end_date).includes(clicked)
+          (b) =>
+            b.status === "confirmed" &&
+            eachDay(b.start_date, b.end_date).includes(clicked)
         )
       ) {
         setMsg("That date is unavailable. Please choose another check-in date.");
@@ -167,6 +187,14 @@ export default function AvailabilityPage() {
     return nightsCount(checkIn, checkOut);
   }, [checkIn, checkOut]);
 
+  const dayCellClassNames = (info: any) => {
+    const d = info.date.toISOString().slice(0, 10);
+    const classes: string[] = [];
+    if (checkoutMarkers.outConfirmed.has(d)) classes.push("checkout-confirmed");
+    if (checkoutMarkers.outProvisional.has(d)) classes.push("checkout-provisional");
+    return classes;
+  };
+
   const bookingEvents = useMemo(() => {
     return bookings.map((b, idx) => ({
       id: `public-booking-${b.id ?? idx}`,
@@ -203,7 +231,10 @@ export default function AvailabilityPage() {
     ];
   }, [checkIn, checkOut]);
 
-  const allEvents = useMemo(() => [...bookingEvents, ...selectionEvents], [bookingEvents, selectionEvents]);
+  const allEvents = useMemo(
+    () => [...bookingEvents, ...selectionEvents],
+    [bookingEvents, selectionEvents]
+  );
 
   function eventClassNames(arg: any) {
     const kind = arg.event.extendedProps?.kind;
@@ -232,7 +263,9 @@ export default function AvailabilityPage() {
     if (kind === "selection") {
       return (
         <div className="band-inner">
-          <div className="band-title" style={{ color: "#1d4ed8" }}>{arg.event.title}</div>
+          <div className="band-title" style={{ color: "#1d4ed8" }}>
+            {arg.event.title}
+          </div>
         </div>
       );
     }
@@ -260,6 +293,7 @@ export default function AvailabilityPage() {
         .fc .fc-daygrid-day-frame {
           border-radius: 10px;
           overflow: visible;
+          position: relative;
         }
 
         .fc .fc-daygrid-day {
@@ -277,10 +311,41 @@ export default function AvailabilityPage() {
           color: #111827;
           text-decoration: none !important;
           font-weight: 700;
+          position: relative;
+          z-index: 3;
+        }
+
+        .fc .fc-daygrid-day.checkout-confirmed .fc-daygrid-day-frame::after,
+        .fc .fc-daygrid-day.checkout-provisional .fc-daygrid-day-frame::after {
+          content: "";
+          position: absolute;
+          left: 0;
+          top: 22px;
+          bottom: 2px;
+          width: 50%;
+          pointer-events: none;
+          z-index: 1;
+          box-sizing: border-box;
+        }
+
+        .fc .fc-daygrid-day.checkout-confirmed .fc-daygrid-day-frame::after {
+          background: #f7cfd2;
+          border-left: 1px solid #111;
+          border-top: 1px solid #111;
+          border-bottom: 1px solid #111;
+        }
+
+        .fc .fc-daygrid-day.checkout-provisional .fc-daygrid-day-frame::after {
+          background: #f4d08a;
+          border-left: 1px solid #111;
+          border-top: 1px solid #111;
+          border-bottom: 1px solid #111;
         }
 
         .fc .fc-daygrid-event-harness {
           margin-top: 2px;
+          position: relative;
+          z-index: 2;
         }
 
         .fc .fc-daygrid-event-harness .fc-h-event,
@@ -291,15 +356,16 @@ export default function AvailabilityPage() {
         }
 
         .fc .calendar-band {
-          border: none !important;
           border-radius: 0 !important;
           padding: 0 !important;
           min-height: 22px;
           box-shadow: none !important;
+          box-sizing: border-box;
         }
 
         .fc .public-booking-band {
           min-height: 22px;
+          border: 1px solid #111 !important;
         }
 
         .fc .public-booking-confirmed {
@@ -312,6 +378,7 @@ export default function AvailabilityPage() {
 
         .fc .selection-band {
           background: rgba(59,130,246,0.18) !important;
+          border: 1px solid rgba(29,78,216,0.65) !important;
         }
 
         .fc .calendar-band.fc-event-start:not(.fc-event-end) {
@@ -319,12 +386,12 @@ export default function AvailabilityPage() {
         }
 
         .fc .calendar-band.fc-event-end:not(.fc-event-start) {
-          margin-right: 50% !important;
+          margin-right: 0 !important;
         }
 
         .fc .calendar-band.fc-event-start.fc-event-end {
           margin-left: 50% !important;
-          margin-right: 50% !important;
+          margin-right: 0 !important;
         }
 
         .fc .band-inner {
@@ -371,7 +438,14 @@ export default function AvailabilityPage() {
       </p>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 14 }}>
-        <div style={{ padding: 12, borderRadius: 12, border: "1px solid #e6e6e6", background: "white" }}>
+        <div
+          style={{
+            padding: 12,
+            borderRadius: 12,
+            border: "1px solid #e6e6e6",
+            background: "white",
+          }}
+        >
           <FullCalendar
             plugins={[dayGridPlugin, interactionPlugin]}
             initialView="dayGridMonth"
@@ -381,11 +455,19 @@ export default function AvailabilityPage() {
             events={allEvents}
             eventClassNames={eventClassNames}
             eventContent={eventContent}
+            dayCellClassNames={dayCellClassNames}
             dayMaxEvents={4}
           />
         </div>
 
-        <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e6e6e6", background: "white" }}>
+        <div
+          style={{
+            padding: 14,
+            borderRadius: 12,
+            border: "1px solid #e6e6e6",
+            background: "white",
+          }}
+        >
           <h2 style={{ margin: "0 0 10px", fontSize: 16 }}>Your selection</h2>
 
           {!checkIn ? (
@@ -399,7 +481,9 @@ export default function AvailabilityPage() {
 
               <div style={{ marginBottom: 10 }}>
                 <div style={{ fontSize: 12, opacity: 0.7 }}>Checkout</div>
-                <div style={{ fontWeight: 800 }}>{checkOut ?? "Now click your checkout date"}</div>
+                <div style={{ fontWeight: 800 }}>
+                  {checkOut ?? "Now click your checkout date"}
+                </div>
               </div>
 
               {nights != null && (
@@ -409,7 +493,15 @@ export default function AvailabilityPage() {
               )}
 
               {checkIn && checkOut && (
-                <div style={{ padding: 12, borderRadius: 12, border: "1px solid #eee", background: "#fafafa", marginBottom: 12 }}>
+                <div
+                  style={{
+                    padding: 12,
+                    borderRadius: 12,
+                    border: "1px solid #eee",
+                    background: "#fafafa",
+                    marginBottom: 12,
+                  }}
+                >
                   <div style={{ fontSize: 12, opacity: 0.7 }}>Estimated price</div>
                   {priceInfo?.ok ? (
                     <div style={{ fontSize: 20, fontWeight: 900 }}>£{priceInfo.total}</div>
@@ -456,7 +548,15 @@ export default function AvailabilityPage() {
           )}
 
           {msg && (
-            <div style={{ marginTop: 12, padding: 10, borderRadius: 10, border: "1px solid #ffd0d0", background: "#fff3f3" }}>
+            <div
+              style={{
+                marginTop: 12,
+                padding: 10,
+                borderRadius: 10,
+                border: "1px solid #ffd0d0",
+                background: "#fff3f3",
+              }}
+            >
               {msg}
             </div>
           )}
