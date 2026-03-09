@@ -23,6 +23,7 @@ type Rate = {
 };
 
 type CellState =
+  | "empty"
   | "available"
   | "confirmed"
   | "provisional"
@@ -239,7 +240,8 @@ export default function AvailabilityPage() {
 
     for (const b of bookings) {
       const bookedDays = eachDay(b.start_date, b.end_date);
-      const bookingName = b.guest_name || (b.status === "confirmed" ? "Booked" : "Provisional");
+      const bookingName =
+        b.guest_name || (b.status === "confirmed" ? "Booked" : "Provisional");
 
       bookedDays.forEach((day, idx) => {
         const state =
@@ -290,7 +292,7 @@ export default function AvailabilityPage() {
   function dayCellClassNames(arg: any) {
     const day = isoLocal(arg.date);
     const meta = cellMap.get(day);
-    if (!meta) return ["tile-available"];
+    if (!meta) return ["tile-empty"];
     return [`tile-${meta.state}`];
   }
 
@@ -375,6 +377,7 @@ export default function AvailabilityPage() {
           box-sizing: border-box;
         }
 
+        .fc .fc-daygrid-day.tile-empty { background: #ffffff !important; }
         .fc .fc-daygrid-day.tile-available { background: #5fa03e !important; }
         .fc .fc-daygrid-day.tile-confirmed { background: #d84848 !important; }
         .fc .fc-daygrid-day.tile-provisional { background: #d99a4b !important; }
@@ -419,6 +422,7 @@ export default function AvailabilityPage() {
           line-height: 1;
         }
 
+        .fc .fc-dayother .tile-day,
         .fc .fc-day-other .tile-day {
           opacity: 0.4;
         }
