@@ -1,4 +1,4 @@
-l"use client";
+"use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
@@ -11,21 +11,16 @@ type Booking = {
   start_date: string;
   end_date: string; // checkout day
   status?: "provisional" | "confirmed" | null;
-
   guest_name: string | null;
   guest_email?: string | null;
   phone?: string | null;
-
   contact?: string | null;
   notes?: string | null;
-
   guests_count?: number | null;
   children_count?: number | null;
   dogs_count?: number | null;
-
   vehicle_reg?: string | null;
   special_requests?: string | null;
-
   created_at?: string;
 };
 
@@ -202,7 +197,12 @@ export default function Dashboard() {
       const res = await fetch("/api/bookings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ start_date, end_date, status: "confirmed", guest_name: "New booking" }),
+        body: JSON.stringify({
+          start_date,
+          end_date,
+          status: "confirmed",
+          guest_name: "New booking",
+        }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -304,7 +304,11 @@ export default function Dashboard() {
 
     const json = await res.json();
     if (!res.ok) {
-      setEditor({ ...editor, saving: false, err: json?.error || "Could not save booking" });
+      setEditor({
+        ...editor,
+        saving: false,
+        err: json?.error || "Could not save booking",
+      });
       return;
     }
 
@@ -314,7 +318,9 @@ export default function Dashboard() {
 
   async function deleteBooking(id: string) {
     if (!confirm("Delete this booking?")) return;
-    await fetch(`/api/bookings?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    await fetch(`/api/bookings?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
     setEditor(null);
     await loadAll();
   }
@@ -340,18 +346,30 @@ export default function Dashboard() {
     setEditor({ ...editor, saving: true, err: "" });
 
     if (editor.rate.id) {
-      await fetch(`/api/rates?id=${encodeURIComponent(editor.rate.id)}`, { method: "DELETE" });
+      await fetch(`/api/rates?id=${encodeURIComponent(editor.rate.id)}`, {
+        method: "DELETE",
+      });
     }
 
     const res = await fetch("/api/rates", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ start_date, end_date, price, rate_type, note: note || null }),
+      body: JSON.stringify({
+        start_date,
+        end_date,
+        price,
+        rate_type,
+        note: note || null,
+      }),
     });
 
     const json = await res.json();
     if (!res.ok) {
-      setEditor({ ...editor, saving: false, err: json?.error || "Could not save rate" });
+      setEditor({
+        ...editor,
+        saving: false,
+        err: json?.error || "Could not save rate",
+      });
       return;
     }
 
@@ -361,7 +379,9 @@ export default function Dashboard() {
 
   async function deleteRate(id: string) {
     if (!confirm("Delete this price block?")) return;
-    await fetch(`/api/rates?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    await fetch(`/api/rates?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
     setEditor(null);
     await loadAll();
   }
@@ -381,23 +401,23 @@ export default function Dashboard() {
     }
 
     for (const b of bookings) {
+      const bookingName =
+        b.guest_name || (b.status === "confirmed" ? "Booked" : "Provisional");
+
       const bookedDays = eachDay(b.start_date, b.end_date);
-      const bookingName = b.guest_name || (b.status === "confirmed" ? "Booked" : "Provisional");
 
       bookedDays.forEach((day, idx) => {
-        const state =
-          b.status === "confirmed"
-            ? idx === 0
-              ? "confirmed-checkin"
-              : "confirmed"
-            : idx === 0
-            ? "provisional-checkin"
-            : "provisional";
-
         const existing = map.get(day);
 
         map.set(day, {
-          state,
+          state:
+            b.status === "confirmed"
+              ? idx === 0
+                ? "confirmed-checkin"
+                : "confirmed"
+              : idx === 0
+              ? "provisional-checkin"
+              : "provisional",
           bookingName,
           price: getDailyDisplayPrice(day, rates),
           checkInName: idx === 0 ? bookingName : existing?.checkInName,
@@ -408,7 +428,10 @@ export default function Dashboard() {
       const checkoutExisting = map.get(b.end_date);
 
       map.set(b.end_date, {
-        state: b.status === "confirmed" ? "confirmed-checkout" : "provisional-checkout",
+        state:
+          b.status === "confirmed"
+            ? "confirmed-checkout"
+            : "provisional-checkout",
         bookingName,
         price: getDailyDisplayPrice(b.end_date, rates),
         checkInName: checkoutExisting?.checkInName,
@@ -449,17 +472,17 @@ export default function Dashboard() {
     inner.appendChild(dayEl);
 
     if (meta?.checkInName) {
-      const checkInEl = document.createElement("div");
-      checkInEl.className = "tile-checkin-label";
-      checkInEl.innerHTML = `Check-in<br>${meta.checkInName}`;
-      inner.appendChild(checkInEl);
+      const el = document.createElement("div");
+      el.className = "tile-checkin-label";
+      el.innerHTML = `Check-in<br>${meta.checkInName}`;
+      inner.appendChild(el);
     }
 
     if (meta?.checkOutName) {
-      const checkOutEl = document.createElement("div");
-      checkOutEl.className = "tile-checkout-label";
-      checkOutEl.innerHTML = `Check-out<br>${meta.checkOutName}`;
-      inner.appendChild(checkOutEl);
+      const el = document.createElement("div");
+      el.className = "tile-checkout-label";
+      el.innerHTML = `Check-out<br>${meta.checkOutName}`;
+      inner.appendChild(el);
     }
 
     if (!meta?.checkInName && !meta?.checkOutName && meta?.bookingName) {
@@ -590,7 +613,7 @@ export default function Dashboard() {
           position: absolute;
           left: 8px;
           right: 8px;
-          top: 30px;
+          top: 28px;
           font-size: 10px;
           font-weight: 800;
           color: #fff;
@@ -688,8 +711,18 @@ export default function Dashboard() {
                   const status = (b.status ?? "confirmed") as "confirmed" | "provisional";
                   const pill =
                     status === "confirmed"
-                      ? { bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.35)", text: "#b91c1c", label: "Confirmed" }
-                      : { bg: "rgba(245,158,11,0.14)", border: "rgba(245,158,11,0.4)", text: "#92400e", label: "Provisional" };
+                      ? {
+                          bg: "rgba(239,68,68,0.12)",
+                          border: "rgba(239,68,68,0.35)",
+                          text: "#b91c1c",
+                          label: "Confirmed",
+                        }
+                      : {
+                          bg: "rgba(245,158,11,0.14)",
+                          border: "rgba(245,158,11,0.4)",
+                          text: "#92400e",
+                          label: "Provisional",
+                        };
 
                   const price = bookingPriceMap.get(b.id);
                   const priceBadge =
@@ -713,8 +746,12 @@ export default function Dashboard() {
                     >
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
                         <div>
-                          <div style={{ fontWeight: 900, marginBottom: 2 }}>{b.guest_name || "Booking"}</div>
-                          <div style={{ fontSize: 13, opacity: 0.75 }}>{fmtRange(b.start_date, b.end_date)}</div>
+                          <div style={{ fontWeight: 900, marginBottom: 2 }}>
+                            {b.guest_name || "Booking"}
+                          </div>
+                          <div style={{ fontSize: 13, opacity: 0.75 }}>
+                            {fmtRange(b.start_date, b.end_date)}
+                          </div>
                         </div>
 
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -724,8 +761,14 @@ export default function Dashboard() {
                               fontWeight: 900,
                               padding: "6px 10px",
                               borderRadius: 999,
-                              border: `1px solid ${priceBadge.ok ? "rgba(34,197,94,0.45)" : "rgba(0,0,0,0.12)"}`,
-                              background: priceBadge.ok ? "rgba(34,197,94,0.12)" : "rgba(0,0,0,0.04)",
+                              border: `1px solid ${
+                                priceBadge.ok
+                                  ? "rgba(34,197,94,0.45)"
+                                  : "rgba(0,0,0,0.12)"
+                              }`,
+                              background: priceBadge.ok
+                                ? "rgba(34,197,94,0.12)"
+                                : "rgba(0,0,0,0.04)",
                               color: priceBadge.ok ? "#14532d" : "rgba(0,0,0,0.55)",
                               whiteSpace: "nowrap",
                             }}
@@ -750,9 +793,22 @@ export default function Dashboard() {
                         </div>
                       </div>
 
-                      <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, opacity: 0.8 }}>
-                        {typeof b.guests_count === "number" && <span>👤 Guests: {b.guests_count}</span>}
-                        {typeof b.dogs_count === "number" && <span>🐶 Dogs: {b.dogs_count}</span>}
+                      <div
+                        style={{
+                          marginTop: 10,
+                          display: "flex",
+                          gap: 10,
+                          flexWrap: "wrap",
+                          fontSize: 12,
+                          opacity: 0.8,
+                        }}
+                      >
+                        {typeof b.guests_count === "number" && (
+                          <span>👤 Guests: {b.guests_count}</span>
+                        )}
+                        {typeof b.dogs_count === "number" && (
+                          <span>🐶 Dogs: {b.dogs_count}</span>
+                        )}
                         {b.phone && <span>📞 {b.phone}</span>}
                         {b.guest_email && <span>✉️ {b.guest_email}</span>}
                       </div>
@@ -783,7 +839,10 @@ export default function Dashboard() {
                   type="date"
                   value={String(editor.draft.start_date ?? editor.rate.start_date ?? "")}
                   onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, start_date: e.target.value } })
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, start_date: e.target.value },
+                    })
                   }
                 />
               </Field>
@@ -794,7 +853,10 @@ export default function Dashboard() {
                   type="date"
                   value={String(editor.draft.end_date ?? editor.rate.end_date ?? "")}
                   onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, end_date: e.target.value } })
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, end_date: e.target.value },
+                    })
                   }
                 />
               </Field>
@@ -806,7 +868,10 @@ export default function Dashboard() {
                   onChange={(e) =>
                     setEditor({
                       ...editor,
-                      draft: { ...editor.draft, rate_type: e.target.value as "nightly" | "total" },
+                      draft: {
+                        ...editor.draft,
+                        rate_type: e.target.value as "nightly" | "total",
+                      },
                     })
                   }
                 >
@@ -822,7 +887,10 @@ export default function Dashboard() {
                   min={0}
                   value={Number(editor.draft.price ?? editor.rate.price ?? 0)}
                   onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, price: Number(e.target.value) } })
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, price: Number(e.target.value) },
+                    })
                   }
                 />
               </Field>
@@ -832,7 +900,10 @@ export default function Dashboard() {
                   style={styles.input}
                   value={String(editor.draft.note ?? editor.rate.note ?? "")}
                   onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, note: e.target.value } })
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, note: e.target.value },
+                    })
                   }
                 />
               </Field>
@@ -840,16 +911,28 @@ export default function Dashboard() {
               {editor.err && <div style={styles.err}>{editor.err}</div>}
 
               <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <button style={styles.primaryBtn} onClick={saveRate} disabled={editor.saving}>
+                <button
+                  style={styles.primaryBtn}
+                  onClick={saveRate}
+                  disabled={editor.saving}
+                >
                   {editor.saving ? "Saving…" : "Save price"}
                 </button>
 
                 {editor.rate.id ? (
-                  <button style={styles.dangerBtn} onClick={() => deleteRate(editor.rate.id)} disabled={editor.saving}>
+                  <button
+                    style={styles.dangerBtn}
+                    onClick={() => deleteRate(editor.rate.id)}
+                    disabled={editor.saving}
+                  >
                     Delete
                   </button>
                 ) : (
-                  <button style={styles.subBtn} onClick={() => setEditor(null)} disabled={editor.saving}>
+                  <button
+                    style={styles.subBtn}
+                    onClick={() => setEditor(null)}
+                    disabled={editor.saving}
+                  >
                     Cancel
                   </button>
                 )}
@@ -865,7 +948,10 @@ export default function Dashboard() {
                   type="date"
                   value={String(editor.draft.start_date ?? "")}
                   onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, start_date: e.target.value } })
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, start_date: e.target.value },
+                    })
                   }
                 />
               </Field>
@@ -876,7 +962,10 @@ export default function Dashboard() {
                   type="date"
                   value={String(editor.draft.end_date ?? "")}
                   onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, end_date: e.target.value } })
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, end_date: e.target.value },
+                    })
                   }
                 />
               </Field>
@@ -888,7 +977,10 @@ export default function Dashboard() {
                   onChange={(e) =>
                     setEditor({
                       ...editor,
-                      draft: { ...editor.draft, status: e.target.value as "provisional" | "confirmed" },
+                      draft: {
+                        ...editor.draft,
+                        status: e.target.value as "provisional" | "confirmed",
+                      },
                     })
                   }
                 >
@@ -904,7 +996,10 @@ export default function Dashboard() {
                   style={styles.input}
                   value={String(editor.draft.guest_name ?? "")}
                   onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, guest_name: e.target.value } })
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, guest_name: e.target.value },
+                    })
                   }
                 />
               </Field>
@@ -914,7 +1009,10 @@ export default function Dashboard() {
                   style={styles.input}
                   value={String(editor.draft.guest_email ?? "")}
                   onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, guest_email: e.target.value } })
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, guest_email: e.target.value },
+                    })
                   }
                 />
               </Field>
@@ -924,7 +1022,10 @@ export default function Dashboard() {
                   style={styles.input}
                   value={String(editor.draft.phone ?? "")}
                   onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, phone: e.target.value } })
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, phone: e.target.value },
+                    })
                   }
                 />
               </Field>
@@ -937,7 +1038,13 @@ export default function Dashboard() {
                   max={8}
                   value={Number(editor.draft.guests_count ?? 0)}
                   onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, guests_count: Number(e.target.value) } })
+                    setEditor({
+                      ...editor,
+                      draft: {
+                        ...editor.draft,
+                        guests_count: Number(e.target.value),
+                      },
+                    })
                   }
                 />
               </Field>
@@ -950,7 +1057,13 @@ export default function Dashboard() {
                   max={8}
                   value={Number(editor.draft.children_count ?? 0)}
                   onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, children_count: Number(e.target.value) } })
+                    setEditor({
+                      ...editor,
+                      draft: {
+                        ...editor.draft,
+                        children_count: Number(e.target.value),
+                      },
+                    })
                   }
                 />
               </Field>
@@ -963,7 +1076,13 @@ export default function Dashboard() {
                   max={5}
                   value={Number(editor.draft.dogs_count ?? 0)}
                   onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, dogs_count: Number(e.target.value) } })
+                    setEditor({
+                      ...editor,
+                      draft: {
+                        ...editor.draft,
+                        dogs_count: Number(e.target.value),
+                      },
+                    })
                   }
                 />
               </Field>
@@ -973,7 +1092,10 @@ export default function Dashboard() {
                   style={styles.input}
                   value={String(editor.draft.vehicle_reg ?? "")}
                   onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, vehicle_reg: e.target.value } })
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, vehicle_reg: e.target.value },
+                    })
                   }
                 />
               </Field>
@@ -983,7 +1105,13 @@ export default function Dashboard() {
                   style={{ ...styles.input, minHeight: 80, resize: "vertical" }}
                   value={String(editor.draft.special_requests ?? "")}
                   onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, special_requests: e.target.value } })
+                    setEditor({
+                      ...editor,
+                      draft: {
+                        ...editor.draft,
+                        special_requests: e.target.value,
+                      },
+                    })
                   }
                 />
               </Field>
@@ -993,7 +1121,10 @@ export default function Dashboard() {
                   style={{ ...styles.input, minHeight: 70, resize: "vertical" }}
                   value={String(editor.draft.notes ?? "")}
                   onChange={(e) =>
-                    setEditor({ ...editor, draft: { ...editor.draft, notes: e.target.value } })
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, notes: e.target.value },
+                    })
                   }
                 />
               </Field>
@@ -1001,10 +1132,18 @@ export default function Dashboard() {
               {editor.err && <div style={styles.err}>{editor.err}</div>}
 
               <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <button style={styles.primaryBtn} onClick={saveBooking} disabled={editor.saving}>
+                <button
+                  style={styles.primaryBtn}
+                  onClick={saveBooking}
+                  disabled={editor.saving}
+                >
                   {editor.saving ? "Saving…" : "Save changes"}
                 </button>
-                <button style={styles.dangerBtn} onClick={() => deleteBooking(editor.booking.id)} disabled={editor.saving}>
+                <button
+                  style={styles.dangerBtn}
+                  onClick={() => deleteBooking(editor.booking.id)}
+                  disabled={editor.saving}
+                >
                   Delete
                 </button>
               </div>
