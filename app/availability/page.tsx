@@ -89,7 +89,11 @@ function calcPrice(startISO: string, endISO: string, rates: Rate[]) {
       r.end_date === endISO
   );
   if (exactTotal) {
-    return { ok: true as const, total: Number(exactTotal.price), method: "total" as const };
+    return {
+      ok: true as const,
+      total: Number(exactTotal.price),
+      method: "total" as const,
+    };
   }
 
   const nights = eachDay(startISO, endISO);
@@ -103,12 +107,20 @@ function calcPrice(startISO: string, endISO: string, rates: Rate[]) {
         day < r.end_date
     );
     if (!nightly) {
-      return { ok: false as const, total: null, method: "missing" as const };
+      return {
+        ok: false as const,
+        total: null,
+        method: "missing" as const,
+      };
     }
     total += Number(nightly.price);
   }
 
-  return { ok: true as const, total, method: "nightly" as const };
+  return {
+    ok: true as const,
+    total,
+    method: "nightly" as const,
+  };
 }
 
 function getDailyDisplayPrice(day: string, rates: Rate[]) {
@@ -246,8 +258,12 @@ export default function AvailabilityPage() {
       bookedDays.forEach((day, idx) => {
         const state =
           b.status === "confirmed"
-            ? (idx === 0 ? "confirmed-checkin" : "confirmed")
-            : (idx === 0 ? "provisional-checkin" : "provisional");
+            ? idx === 0
+              ? "confirmed-checkin"
+              : "confirmed"
+            : idx === 0
+            ? "provisional-checkin"
+            : "provisional";
 
         map.set(day, {
           state,
@@ -296,32 +312,64 @@ export default function AvailabilityPage() {
     return [`tile-${meta.state}`];
   }
 
-  function dayCellContent(arg: any) {
+  function dayCellDidMount(arg: any) {
     const day = isoLocal(arg.date);
     const meta = cellMap.get(day);
-    const dayNum = arg.dayNumberText.replace(/\D/g, "");
 
-    return (
-      <div className="tile-inner">
-        <div className="tile-day">{dayNum}</div>
+    const top = arg.el.querySelector(".fc-daygrid-day-top");
+    if (top) {
+      (top as HTMLElement).style.display = "none";
+    }
 
-        {meta?.bookingName && (
-          <div className="tile-booking-name">{meta.bookingName}</div>
-        )}
+    const frame = arg.el.querySelector(".fc-daygrid-day-frame");
+    if (!frame) return;
 
-        {meta?.state === "selected-checkin" && (
-          <div className="tile-selected-label">Check-in</div>
-        )}
-        {meta?.state === "selected-checkout" && (
-          <div className="tile-selected-label">Checkout</div>
-        )}
-        {meta?.state === "selected" && (
-          <div className="tile-selected-label">Selected</div>
-        )}
+    frame.innerHTML = "";
 
-        {meta?.price && <div className="tile-price">{meta.price}</div>}
-      </div>
-    );
+    const inner = document.createElement("div");
+    inner.className = "tile-inner";
+
+    const dayEl = document.createElement("div");
+    dayEl.className = "tile-day";
+    dayEl.textContent = String(arg.date.getDate());
+    inner.appendChild(dayEl);
+
+    if (meta?.bookingName) {
+      const bookingEl = document.createElement("div");
+      bookingEl.className = "tile-booking-name";
+      bookingEl.textContent = meta.bookingName;
+      inner.appendChild(bookingEl);
+    }
+
+    if (meta?.state === "selected-checkin") {
+      const labelEl = document.createElement("div");
+      labelEl.className = "tile-selected-label";
+      labelEl.textContent = "Check-in";
+      inner.appendChild(labelEl);
+    }
+
+    if (meta?.state === "selected-checkout") {
+      const labelEl = document.createElement("div");
+      labelEl.className = "tile-selected-label";
+      labelEl.textContent = "Checkout";
+      inner.appendChild(labelEl);
+    }
+
+    if (meta?.state === "selected") {
+      const labelEl = document.createElement("div");
+      labelEl.className = "tile-selected-label";
+      labelEl.textContent = "Selected";
+      inner.appendChild(labelEl);
+    }
+
+    if (meta?.price) {
+      const priceEl = document.createElement("div");
+      priceEl.className = "tile-price";
+      priceEl.textContent = meta.price;
+      inner.appendChild(priceEl);
+    }
+
+    frame.appendChild(inner);
   }
 
   function requestBooking() {
@@ -422,7 +470,6 @@ export default function AvailabilityPage() {
           line-height: 1;
         }
 
-        .fc .fc-dayother .tile-day,
         .fc .fc-day-other .tile-day {
           opacity: 0.4;
         }
@@ -493,7 +540,7 @@ export default function AvailabilityPage() {
             selectable={false}
             dateClick={onDateClick}
             dayCellClassNames={dayCellClassNames}
-            dayCellContent={dayCellContent}
+            dayCellDidMount={dayCellDidMount}
             events={[]}
           />
         </div>
