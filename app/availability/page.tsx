@@ -73,9 +73,9 @@ function isAllowedPattern(startISO: string, endISO: string) {
   const startDay = start.getDay();
   const endDay = end.getDay();
 
-  if (startDay === 5 && endDay === 1) return { ok: true, reason: "" }; // Fri-Mon
-  if (startDay === 1 && endDay === 5) return { ok: true, reason: "" }; // Mon-Fri
-  if (startDay === 6 && endDay === 6) return { ok: true, reason: "" }; // Sat-Sat
+  if (startDay === 5 && endDay === 1) return { ok: true, reason: "" };
+  if (startDay === 1 && endDay === 5) return { ok: true, reason: "" };
+  if (startDay === 6 && endDay === 6) return { ok: true, reason: "" };
 
   return { ok: false, reason: "Allowed stays are Fri–Mon, Mon–Fri, or Sat–Sat." };
 }
@@ -226,7 +226,6 @@ export default function AvailabilityPage() {
   const cellMap = useMemo(() => {
     const map = new Map<string, CellMeta>();
 
-    // Fill rate-based available tiles
     for (const r of rates) {
       eachDay(r.start_date, r.end_date).forEach((day) => {
         if (!map.has(day)) {
@@ -238,7 +237,6 @@ export default function AvailabilityPage() {
       });
     }
 
-    // Apply bookings
     for (const b of bookings) {
       const bookedDays = eachDay(b.start_date, b.end_date);
       const bookingName = b.guest_name || (b.status === "confirmed" ? "Booked" : "Provisional");
@@ -263,7 +261,6 @@ export default function AvailabilityPage() {
       });
     }
 
-    // Apply user selection on top
     if (checkIn) {
       if (!checkOut) {
         map.set(checkIn, {
@@ -291,21 +288,25 @@ export default function AvailabilityPage() {
   }, [bookings, rates, checkIn, checkOut]);
 
   function dayCellClassNames(arg: any) {
-    const meta = cellMap.get(arg.dateStr);
-    if (!meta) return ["tile-frame", "tile-available"];
-    return ["tile-frame", `tile-${meta.state}`];
+    const day = isoLocal(arg.date);
+    const meta = cellMap.get(day);
+    if (!meta) return ["tile-available"];
+    return [`tile-${meta.state}`];
   }
 
   function dayCellContent(arg: any) {
-    const meta = cellMap.get(arg.dateStr);
+    const day = isoLocal(arg.date);
+    const meta = cellMap.get(day);
     const dayNum = arg.dayNumberText.replace(/\D/g, "");
 
     return (
       <div className="tile-inner">
         <div className="tile-day">{dayNum}</div>
+
         {meta?.bookingName && (
           <div className="tile-booking-name">{meta.bookingName}</div>
         )}
+
         {meta?.state === "selected-checkin" && (
           <div className="tile-selected-label">Check-in</div>
         )}
@@ -315,6 +316,7 @@ export default function AvailabilityPage() {
         {meta?.state === "selected" && (
           <div className="tile-selected-label">Selected</div>
         )}
+
         {meta?.price && <div className="tile-price">{meta.price}</div>}
       </div>
     );
@@ -341,10 +343,6 @@ export default function AvailabilityPage() {
         .fc .fc-toolbar-title {
           font-size: 30px !important;
           font-weight: 800 !important;
-        }
-
-        .fc .fc-daygrid-day {
-          background: #ffffff;
         }
 
         .fc .fc-scrollgrid,
@@ -377,48 +375,33 @@ export default function AvailabilityPage() {
           box-sizing: border-box;
         }
 
-        .tile-frame {
-          color: #fff;
+        .fc .fc-daygrid-day.tile-available { background: #5fa03e !important; }
+        .fc .fc-daygrid-day.tile-confirmed { background: #d84848 !important; }
+        .fc .fc-daygrid-day.tile-provisional { background: #d99a4b !important; }
+        .fc .fc-daygrid-day.tile-selected { background: #5c8fce !important; }
+
+        .fc .fc-daygrid-day.tile-confirmed-checkin {
+          background: linear-gradient(135deg, #5fa03e 0 49%, #d84848 51% 100%) !important;
         }
 
-        .tile-available {
-          background: #5fa03e;
+        .fc .fc-daygrid-day.tile-confirmed-checkout {
+          background: linear-gradient(135deg, #d84848 0 49%, #5fa03e 51% 100%) !important;
         }
 
-        .tile-confirmed {
-          background: #d84848;
+        .fc .fc-daygrid-day.tile-provisional-checkin {
+          background: linear-gradient(135deg, #5fa03e 0 49%, #d99a4b 51% 100%) !important;
         }
 
-        .tile-provisional {
-          background: #d99a4b;
+        .fc .fc-daygrid-day.tile-provisional-checkout {
+          background: linear-gradient(135deg, #d99a4b 0 49%, #5fa03e 51% 100%) !important;
         }
 
-        .tile-selected {
-          background: #5c8fce;
+        .fc .fc-daygrid-day.tile-selected-checkin {
+          background: linear-gradient(135deg, #5fa03e 0 49%, #5c8fce 51% 100%) !important;
         }
 
-        .tile-confirmed-checkin {
-          background: linear-gradient(135deg, #5fa03e 0 49%, #d84848 51% 100%);
-        }
-
-        .tile-confirmed-checkout {
-          background: linear-gradient(135deg, #d84848 0 49%, #5fa03e 51% 100%);
-        }
-
-        .tile-provisional-checkin {
-          background: linear-gradient(135deg, #5fa03e 0 49%, #d99a4b 51% 100%);
-        }
-
-        .tile-provisional-checkout {
-          background: linear-gradient(135deg, #d99a4b 0 49%, #5fa03e 51% 100%);
-        }
-
-        .tile-selected-checkin {
-          background: linear-gradient(135deg, #5fa03e 0 49%, #5c8fce 51% 100%);
-        }
-
-        .tile-selected-checkout {
-          background: linear-gradient(135deg, #5c8fce 0 49%, #5fa03e 51% 100%);
+        .fc .fc-daygrid-day.tile-selected-checkout {
+          background: linear-gradient(135deg, #5c8fce 0 49%, #5fa03e 51% 100%) !important;
         }
 
         .tile-inner {
@@ -426,6 +409,7 @@ export default function AvailabilityPage() {
           min-height: 96px;
           padding: 8px;
           box-sizing: border-box;
+          color: #fff;
         }
 
         .tile-day {
