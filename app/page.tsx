@@ -1,11 +1,9 @@
-"use client";
+l"use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
-import interactionPlugin, {
-  DateClickArg,
-} from "@fullcalendar/interaction";
+import interactionPlugin, { DateClickArg } from "@fullcalendar/interaction";
 import type { DateSelectArg } from "@fullcalendar/core";
 
 type Booking = {
@@ -71,6 +69,8 @@ type TileMeta = {
   state: TileState;
   bookingName?: string;
   price?: string;
+  checkInName?: string;
+  checkOutName?: string;
 };
 
 function isoLocal(d: Date) {
@@ -102,7 +102,11 @@ function calcBookingPrice(startISO: string, endISO: string, rates: Rate[]) {
       r.end_date === endISO
   );
   if (exactTotal) {
-    return { ok: true as const, total: Number(exactTotal.price), method: "total" as const };
+    return {
+      ok: true as const,
+      total: Number(exactTotal.price),
+      method: "total" as const,
+    };
   }
 
   const nights = eachDay(startISO, endISO);
@@ -115,11 +119,21 @@ function calcBookingPrice(startISO: string, endISO: string, rates: Rate[]) {
         r.start_date <= day &&
         day < r.end_date
     );
-    if (!nightly) return { ok: false as const, total: null, method: "missing" as const };
+    if (!nightly) {
+      return {
+        ok: false as const,
+        total: null,
+        method: "missing" as const,
+      };
+    }
     total += Number(nightly.price);
   }
 
-  return { ok: true as const, total, method: "nightly" as const };
+  return {
+    ok: true as const,
+    total,
+    method: "nightly" as const,
+  };
 }
 
 function getDailyDisplayPrice(day: string, rates: Rate[]) {
@@ -373,20 +387,32 @@ export default function Dashboard() {
       bookedDays.forEach((day, idx) => {
         const state =
           b.status === "confirmed"
-            ? (idx === 0 ? "confirmed-checkin" : "confirmed")
-            : (idx === 0 ? "provisional-checkin" : "provisional");
+            ? idx === 0
+              ? "confirmed-checkin"
+              : "confirmed"
+            : idx === 0
+            ? "provisional-checkin"
+            : "provisional";
+
+        const existing = map.get(day);
 
         map.set(day, {
           state,
           bookingName,
           price: getDailyDisplayPrice(day, rates),
+          checkInName: idx === 0 ? bookingName : existing?.checkInName,
+          checkOutName: existing?.checkOutName,
         });
       });
+
+      const checkoutExisting = map.get(b.end_date);
 
       map.set(b.end_date, {
         state: b.status === "confirmed" ? "confirmed-checkout" : "provisional-checkout",
         bookingName,
         price: getDailyDisplayPrice(b.end_date, rates),
+        checkInName: checkoutExisting?.checkInName,
+        checkOutName: bookingName,
       });
     }
 
@@ -400,18 +426,57 @@ export default function Dashboard() {
     return [`tile-${meta.state}`];
   }
 
-  function dayCellContent(arg: any) {
+  function dayCellDidMount(arg: any) {
     const day = isoLocal(arg.date);
     const meta = tileMap.get(day);
-    const dayNum = arg.dayNumberText.replace(/\D/g, "");
 
-    return (
-      <div className="tile-inner">
-        <div className="tile-day">{dayNum}</div>
-        {meta?.bookingName && <div className="tile-booking-name">{meta.bookingName}</div>}
-        {meta?.price && <div className="tile-price">{meta.price}</div>}
-      </div>
-    );
+    const top = arg.el.querySelector(".fc-daygrid-day-top");
+    if (top) {
+      (top as HTMLElement).style.display = "none";
+    }
+
+    const frame = arg.el.querySelector(".fc-daygrid-day-frame");
+    if (!frame) return;
+
+    frame.innerHTML = "";
+
+    const inner = document.createElement("div");
+    inner.className = "tile-inner";
+
+    const dayEl = document.createElement("div");
+    dayEl.className = "tile-day";
+    dayEl.textContent = String(arg.date.getDate());
+    inner.appendChild(dayEl);
+
+    if (meta?.checkInName) {
+      const checkInEl = document.createElement("div");
+      checkInEl.className = "tile-checkin-label";
+      checkInEl.innerHTML = `Check-in<br>${meta.checkInName}`;
+      inner.appendChild(checkInEl);
+    }
+
+    if (meta?.checkOutName) {
+      const checkOutEl = document.createElement("div");
+      checkOutEl.className = "tile-checkout-label";
+      checkOutEl.innerHTML = `Check-out<br>${meta.checkOutName}`;
+      inner.appendChild(checkOutEl);
+    }
+
+    if (!meta?.checkInName && !meta?.checkOutName && meta?.bookingName) {
+      const nameEl = document.createElement("div");
+      nameEl.className = "tile-booking-name";
+      nameEl.textContent = meta.bookingName;
+      inner.appendChild(nameEl);
+    }
+
+    if (meta?.price) {
+      const priceEl = document.createElement("div");
+      priceEl.className = "tile-price";
+      priceEl.textContent = meta.price;
+      inner.appendChild(priceEl);
+    }
+
+    frame.appendChild(inner);
   }
 
   const upcoming = useMemo(() => {
@@ -520,6 +585,21 @@ export default function Dashboard() {
           text-overflow: ellipsis;
         }
 
+        .tile-checkin-label,
+        .tile-checkout-label {
+          position: absolute;
+          left: 8px;
+          right: 8px;
+          top: 30px;
+          font-size: 10px;
+          font-weight: 800;
+          color: #fff;
+          line-height: 1.15;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
         .tile-price {
           position: absolute;
           bottom: 8px;
@@ -588,7 +668,7 @@ export default function Dashboard() {
                 select={onSelect}
                 dateClick={onDateClick}
                 dayCellClassNames={dayCellClassNames}
-                dayCellContent={dayCellContent}
+                dayCellDidMount={dayCellDidMount}
                 events={[]}
               />
             )}
