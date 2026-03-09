@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin, { DateClickArg } from "@fullcalendar/interaction";
-import type { EventContentArg } from "@fullcalendar/core";
 
 type Booking = {
   id?: string;
@@ -23,15 +22,31 @@ type Rate = {
   note?: string | null;
 };
 
+type CellState =
+  | "available"
+  | "confirmed"
+  | "provisional"
+  | "selected"
+  | "selected-checkin"
+  | "selected-checkout"
+  | "confirmed-checkin"
+  | "confirmed-checkout"
+  | "provisional-checkin"
+  | "provisional-checkout";
+
+function isoLocal(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function eachDay(startISO: string, endISO: string) {
   const out: string[] = [];
   const start = new Date(`${startISO}T00:00:00`);
   const end = new Date(`${endISO}T00:00:00`);
   for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    out.push(`${y}-${m}-${day}`);
+    out.push(isoLocal(d));
   }
   return out;
 }
@@ -52,9 +67,9 @@ function isAllowedPattern(startISO: string, endISO: string) {
   const startDay = start.getDay();
   const endDay = end.getDay();
 
-  if (startDay === 5 && endDay === 1) return { ok: true, reason: "" };
-  if (startDay === 1 && endDay === 5) return { ok: true, reason: "" };
-  if (startDay === 6 && endDay === 6) return { ok: true, reason: "" };
+  if (startDay === 5 && endDay === 1) return { ok: true, reason: "" }; // Fri-Mon
+  if (startDay === 1 && endDay === 5) return { ok: true, reason: "" }; // Mon-Fri
+  if (startDay === 6 && endDay === 6) return { ok: true, reason: "" }; // Sat-Sat
 
   return { ok: false, reason: "Allowed stays are Fri–Mon, Mon–Fri, or Sat–Sat." };
 }
@@ -80,11 +95,33 @@ function calcPrice(startISO: string, endISO: string, rates: Rate[]) {
         r.start_date <= day &&
         day < r.end_date
     );
-    if (!nightly) return { ok: false as const, total: null, method: "missing" as const };
+    if (!nightly) {
+      return { ok: false as const, total: null, method: "missing" as const };
+    }
     total += Number(nightly.price);
   }
 
   return { ok: true as const, total, method: "nightly" as const };
+}
+
+function getDailyDisplayPrice(day: string, rates: Rate[]) {
+  const nightly = rates.find(
+    (r) =>
+      r.rate_type === "nightly" &&
+      r.start_date <= day &&
+      day < r.end_date
+  );
+  if (nightly) return `£${Number(nightly.price)}`;
+
+  const total = rates.find(
+    (r) =>
+      r.rate_type === "total" &&
+      r.start_date <= day &&
+      day < r.end_date
+  );
+  if (total) return `£${Number(total.price)}`;
+
+  return "";
 }
 
 export default function AvailabilityPage() {
@@ -107,48 +144,17 @@ export default function AvailabilityPage() {
     })();
   }, []);
 
-  const bookingStyleMap = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        status: "confirmed" | "provisional";
-        isStart: boolean;
-        isMiddle: boolean;
-        isCheckout: boolean;
-      }
-    >();
-
-    for (const b of bookings) {
-      const bookedDays = eachDay(b.start_date, b.end_date);
-
-      bookedDays.forEach((day, index) => {
-        map.set(day, {
-          status: b.status,
-          isStart: index === 0,
-          isMiddle: index > 0,
-          isCheckout: false,
-        });
-      });
-
-      map.set(b.end_date, {
-        status: b.status,
-        isStart: false,
-        isMiddle: false,
-        isCheckout: true,
-      });
-    }
-
-    return map;
+  const confirmedBookedDays = useMemo(() => {
+    const set = new Set<string>();
+    bookings
+      .filter((b) => b.status === "confirmed")
+      .forEach((b) => eachDay(b.start_date, b.end_date).forEach((d) => set.add(d)));
+    return set;
   }, [bookings]);
 
   function selectionHasConfirmed(startISO: string, endISO: string) {
     const days = eachDay(startISO, endISO);
-    const confirmed = new Set(
-      bookings
-        .filter((b) => b.status === "confirmed")
-        .flatMap((b) => eachDay(b.start_date, b.end_date))
-    );
-    return days.some((d) => confirmed.has(d));
+    return days.some((d) => confirmedBookedDays.has(d));
   }
 
   function onDateClick(arg: DateClickArg) {
@@ -156,13 +162,7 @@ export default function AvailabilityPage() {
     const clicked = arg.dateStr;
 
     if (!checkIn) {
-      if (
-        bookings.some(
-          (b) =>
-            b.status === "confirmed" &&
-            eachDay(b.start_date, b.end_date).includes(clicked)
-        )
-      ) {
+      if (confirmedBookedDays.has(clicked)) {
         setMsg("That date is unavailable. Please choose another check-in date.");
         return;
       }
@@ -192,6 +192,11 @@ export default function AvailabilityPage() {
       return;
     }
 
+    if (confirmedBookedDays.has(clicked)) {
+      setMsg("That date is unavailable. Please choose another check-in date.");
+      return;
+    }
+
     setCheckIn(clicked);
     setCheckOut(null);
   }
@@ -212,77 +217,140 @@ export default function AvailabilityPage() {
     return nightsCount(checkIn, checkOut);
   }, [checkIn, checkOut]);
 
-  const dayCellClassNames = (info: any) => {
-    const d = info.dateStr;
-    const style = bookingStyleMap.get(d);
-    const classes: string[] = [];
-
-    if (style) {
-      if (style.status === "confirmed") classes.push("day-booked-confirmed");
-      else classes.push("day-booked-provisional");
-
-      if (style.isStart) classes.push("day-booking-start");
-      if (style.isMiddle) classes.push("day-booking-middle");
-      if (style.isCheckout) classes.push("day-booking-checkout");
-    }
-
-    if (checkIn === d) classes.push("selected-checkin");
-    if (checkOut === d) classes.push("selected-checkout");
-
-    return classes;
-  };
-
-  const bookingLabelEvents = useMemo(() => {
-    return bookings.map((b, idx) => ({
-      id: `public-booking-label-${b.id ?? idx}`,
-      title: b.status === "confirmed" ? "Booked" : "Provisional",
-      start: b.start_date,
-      end: b.start_date,
-      allDay: true,
-      display: "list-item" as const,
-      extendedProps: {
-        kind: "booking",
-        bookingStatus: b.status,
-      },
-    }));
-  }, [bookings]);
-
-  const selectionEvents = useMemo(() => {
-    if (!checkIn) return [];
-    return [
+  const cellMap = useMemo(() => {
+    const map = new Map<
+      string,
       {
-        id: "selected-label",
-        title: checkOut ? "Your dates" : "Check-in selected",
-        start: checkIn,
-        end: checkIn,
-        allDay: true,
-        display: "list-item" as const,
-        extendedProps: { kind: "selection" },
-      },
+        state: CellState;
+        bookingName?: string;
+        price?: string;
+      }
+    >();
+
+    // default available pricing
+    for (const r of rates) {
+      eachDay(r.start_date, r.end_date).forEach((day) => {
+        if (!map.has(day)) {
+          map.set(day, {
+            state: "available",
+            price: getDailyDisplayPrice(day, rates),
+          });
+        }
+      });
+    }
+
+    // bookings
+    for (const b of bookings) {
+      const bookedDays = eachDay(b.start_date, b.end_date);
+      const bookingName = b.guest_name || (b.status === "confirmed" ? "Booked" : "Provisional");
+
+      bookedDays.forEach((day, idx) => {
+        const base =
+          b.status === "confirmed"
+            ? idx === 0
+              ? "confirmed-checkin"
+              : "confirmed"
+            : idx === 0
+            ? "provisional-checkin"
+            : "provisional";
+
+        map.set(day, {
+          state: base as CellState,
+          bookingName,
+          price: getDailyDisplayPrice(day, rates),
+        });
+      });
+
+      map.set(b.end_date, {
+        state:
+          b.status === "confirmed"
+            ? "confirmed-checkout"
+            : "provisional-checkout",
+        bookingName,
+        price: getDailyDisplayPrice(b.end_date, rates),
+      });
+    }
+
+    // user selection overlays
+    if (checkIn) {
+      if (!checkOut) {
+        map.set(checkIn, {
+          ...(map.get(checkIn) || { price: getDailyDisplayPrice(checkIn, rates) }),
+          state: "selected-checkin",
+        });
+      } else {
+        const selectedDays = eachDay(checkIn, checkOut);
+        selectedDays.forEach((day, idx) => {
+          map.set(day, {
+            ...(map.get(day) || { price: getDailyDisplayPrice(day, rates) }),
+            state: idx === 0 ? "selected-checkin" : "selected",
+          });
+        });
+
+        map.set(checkOut, {
+          ...(map.get(checkOut) || { price: getDailyDisplayPrice(checkOut, rates) }),
+          state: "selected-checkout",
+        });
+      }
+    }
+
+    return map;
+  }, [bookings, rates, checkIn, checkOut]);
+
+  function dayCellDidMount(info: any) {
+    const day = info.dateStr;
+    const meta = cellMap.get(day);
+    if (!meta) return;
+
+    const frame = info.el.querySelector(".fc-daygrid-day-frame");
+    if (!frame) return;
+
+    frame.classList.add("tile-frame");
+    frame.classList.add(`tile-${meta.state}`);
+
+    if (!frame.querySelector(".tile-price") && meta.price) {
+      const price = document.createElement("div");
+      price.className = "tile-price";
+      price.textContent = meta.price;
+      frame.appendChild(price);
+    }
+
+    const bookingStates = [
+      "confirmed",
+      "confirmed-checkin",
+      "confirmed-checkout",
+      "provisional",
+      "provisional-checkin",
+      "provisional-checkout",
     ];
-  }, [checkIn, checkOut]);
 
-  const allEvents = useMemo(
-    () => [...bookingLabelEvents, ...selectionEvents],
-    [bookingLabelEvents, selectionEvents]
-  );
-
-  function eventClassNames(arg: any) {
-    const kind = arg.event.extendedProps?.kind;
-    if (kind === "booking") return ["booking-label"];
-    if (kind === "selection") return ["selection-label"];
-    return [];
-  }
-
-  function eventContent(arg: EventContentArg) {
-    const kind = (arg.event.extendedProps as any)?.kind;
-    if (kind === "booking") {
-      return <div className="label-booking">{arg.event.title}</div>;
+    if (
+      bookingStates.includes(meta.state) &&
+      !frame.querySelector(".tile-booking-name") &&
+      meta.bookingName
+    ) {
+      const name = document.createElement("div");
+      name.className = "tile-booking-name";
+      name.textContent = meta.bookingName;
+      frame.appendChild(name);
     }
-    if (kind === "selection") {
-      return <div className="label-selection">{arg.event.title}</div>;
+
+    if (
+      (meta.state === "selected" ||
+        meta.state === "selected-checkin" ||
+        meta.state === "selected-checkout") &&
+      !frame.querySelector(".tile-selected-label")
+    ) {
+      const label = document.createElement("div");
+      label.className = "tile-selected-label";
+      label.textContent =
+        meta.state === "selected-checkin"
+          ? "Check-in"
+          : meta.state === "selected-checkout"
+          ? "Checkout"
+          : "Selected";
+      frame.appendChild(label);
     }
-    return <div>{arg.event.title}</div>;
   }
 
   function requestBooking() {
@@ -303,145 +371,151 @@ export default function AvailabilityPage() {
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 18 }}>
       <style>{`
-        .fc .fc-daygrid-day-frame {
-          border-radius: 10px;
-          overflow: visible;
-          position: relative;
-          min-height: 88px;
+        .fc .fc-toolbar-title {
+          font-size: 30px !important;
+          font-weight: 800 !important;
         }
 
         .fc .fc-daygrid-day {
-          background: #f8fafc;
+          background: #ffffff;
         }
 
         .fc .fc-scrollgrid,
         .fc .fc-scrollgrid td,
         .fc .fc-scrollgrid th {
-          border-color: #e5e7eb;
+          border-color: #ffffff;
         }
 
-        .fc .fc-col-header-cell-cushion,
-        .fc .fc-daygrid-day-number {
-          color: #111827;
+        .fc .fc-col-header-cell {
+          background: #ffffff;
+        }
+
+        .fc .fc-col-header-cell-cushion {
           text-decoration: none !important;
+          font-size: 15px;
           font-weight: 700;
+          color: #6b7280;
+          padding: 10px 0;
+        }
+
+        .fc .fc-daygrid-day-frame {
+          min-height: 96px;
+          padding: 6px;
+          position: relative;
+          border-radius: 0 !important;
+          overflow: hidden;
+          box-sizing: border-box;
+        }
+
+        .fc .fc-daygrid-day-number {
+          font-size: 18px;
+          font-weight: 800;
+          color: #ffffff;
+          text-decoration: none !important;
           position: relative;
           z-index: 3;
         }
 
-        .fc .fc-daygrid-day.day-booked-confirmed.day-booking-start .fc-daygrid-day-frame {
-          background:
-            linear-gradient(to right, transparent 0 50%, #f7cfd2 50% 100%);
-          box-shadow:
-            inset -1px 0 0 #111,
-            inset 0 1px 0 #111,
-            inset 0 -1px 0 #111;
+        .fc .fc-day-other .fc-daygrid-day-number {
+          opacity: 0.4;
         }
 
-        .fc .fc-daygrid-day.day-booked-provisional.day-booking-start .fc-daygrid-day-frame {
-          background:
-            linear-gradient(to right, transparent 0 50%, #f4d08a 50% 100%);
-          box-shadow:
-            inset -1px 0 0 #111,
-            inset 0 1px 0 #111,
-            inset 0 -1px 0 #111;
-        }
-
-        .fc .fc-daygrid-day.day-booked-confirmed.day-booking-middle .fc-daygrid-day-frame {
-          background: #f7cfd2;
-          box-shadow:
-            inset 0 1px 0 #111,
-            inset 0 -1px 0 #111,
-            inset -1px 0 0 #111;
-        }
-
-        .fc .fc-daygrid-day.day-booked-provisional.day-booking-middle .fc-daygrid-day-frame {
-          background: #f4d08a;
-          box-shadow:
-            inset 0 1px 0 #111,
-            inset 0 -1px 0 #111,
-            inset -1px 0 0 #111;
-        }
-
-        .fc .fc-daygrid-day.day-booked-confirmed.day-booking-checkout .fc-daygrid-day-frame {
-          background:
-            linear-gradient(to right, #f7cfd2 0 50%, transparent 50% 100%);
-          box-shadow:
-            inset 1px 0 0 #111,
-            inset 0 1px 0 #111,
-            inset 0 -1px 0 #111;
-        }
-
-        .fc .fc-daygrid-day.day-booked-provisional.day-booking-checkout .fc-daygrid-day-frame {
-          background:
-            linear-gradient(to right, #f4d08a 0 50%, transparent 50% 100%);
-          box-shadow:
-            inset 1px 0 0 #111,
-            inset 0 1px 0 #111,
-            inset 0 -1px 0 #111;
-        }
-
-        .fc .fc-daygrid-day.selected-checkin .fc-daygrid-day-number,
-        .fc .fc-daygrid-day.selected-checkout .fc-daygrid-day-number {
-          background: #111;
+        .tile-frame {
           color: #fff;
-          border-radius: 999px;
-          padding: 2px 7px;
         }
 
-        .fc .fc-daygrid-event-harness {
-          margin-top: 4px;
-          position: relative;
-          z-index: 4;
+        .tile-available {
+          background: #5fa03e;
         }
 
-        .fc .fc-daygrid-event {
-          border: none !important;
-          background: transparent !important;
-          box-shadow: none !important;
-          padding: 0 !important;
-          margin: 0 !important;
+        .tile-confirmed {
+          background: #d84848;
         }
 
-        .label-booking {
+        .tile-provisional {
+          background: #d99a4b;
+        }
+
+        .tile-selected {
+          background: #5c8fce;
+        }
+
+        .tile-confirmed-checkin {
+          background: linear-gradient(135deg, #5fa03e 0 49%, #d84848 51% 100%);
+        }
+
+        .tile-confirmed-checkout {
+          background: linear-gradient(135deg, #d84848 0 49%, #5fa03e 51% 100%);
+        }
+
+        .tile-provisional-checkin {
+          background: linear-gradient(135deg, #5fa03e 0 49%, #d99a4b 51% 100%);
+        }
+
+        .tile-provisional-checkout {
+          background: linear-gradient(135deg, #d99a4b 0 49%, #5fa03e 51% 100%);
+        }
+
+        .tile-selected-checkin {
+          background: linear-gradient(135deg, #5fa03e 0 49%, #5c8fce 51% 100%);
+        }
+
+        .tile-selected-checkout {
+          background: linear-gradient(135deg, #5c8fce 0 49%, #5fa03e 51% 100%);
+        }
+
+        .tile-price {
+          position: absolute;
+          bottom: 6px;
+          left: 6px;
+          font-size: 12px;
+          font-weight: 700;
+          color: rgba(255,255,255,0.85);
+          z-index: 3;
+        }
+
+        .tile-booking-name {
+          position: absolute;
+          top: 36px;
+          left: 6px;
+          right: 6px;
           font-size: 11px;
-          font-weight: 900;
-          color: #7f1d1d;
-          background: rgba(255,255,255,0.35);
-          padding: 2px 4px;
-          border-radius: 3px;
+          font-weight: 700;
+          color: #fff;
+          z-index: 3;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          width: fit-content;
-          max-width: 100%;
         }
 
-        .label-selection {
+        .tile-selected-label {
+          position: absolute;
+          top: 36px;
+          left: 6px;
+          right: 6px;
           font-size: 11px;
-          font-weight: 900;
-          color: #1d4ed8;
-          background: rgba(255,255,255,0.35);
-          padding: 2px 4px;
-          border-radius: 3px;
+          font-weight: 800;
+          color: #fff;
+          z-index: 3;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          width: fit-content;
-          max-width: 100%;
+        }
+
+        .fc .fc-daygrid-event-harness,
+        .fc .fc-daygrid-event,
+        .fc .fc-daygrid-event-harness-abs {
+          display: none !important;
         }
 
         .fc .fc-daygrid-more-link {
-          color: #374151;
-          font-weight: 700;
+          display: none !important;
         }
       `}</style>
 
       <h1 style={{ margin: "0 0 6px" }}>Availability</h1>
       <p style={{ margin: "0 0 12px", opacity: 0.75 }}>
         Click your <b>check-in</b> date, then click your <b>checkout</b> date.
-        <br />
-        Example: click <b>Friday 17th</b>, then click <b>Monday 20th</b> for a Monday checkout.
         <br />
         Minimum stay <b>3 nights</b>. Allowed stays: <b>Fri–Mon</b>, <b>Mon–Fri</b>, or <b>Sat–Sat</b>.
       </p>
@@ -461,11 +535,8 @@ export default function AvailabilityPage() {
             height="auto"
             selectable={false}
             dateClick={onDateClick}
-            events={allEvents}
-            eventClassNames={eventClassNames}
-            eventContent={eventContent}
-            dayCellClassNames={dayCellClassNames}
-            dayMaxEvents={3}
+            dayCellDidMount={dayCellDidMount}
+            events={[]}
           />
         </div>
 
@@ -569,10 +640,6 @@ export default function AvailabilityPage() {
               {msg}
             </div>
           )}
-
-          <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-            This creates a provisional request — not confirmed until approved.
-          </div>
         </div>
       </div>
     </div>
