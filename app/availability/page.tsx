@@ -34,6 +34,12 @@ type CellState =
   | "provisional-checkin"
   | "provisional-checkout";
 
+type CellMeta = {
+  state: CellState;
+  bookingName?: string;
+  price?: string;
+};
+
 function isoLocal(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -218,16 +224,9 @@ export default function AvailabilityPage() {
   }, [checkIn, checkOut]);
 
   const cellMap = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        state: CellState;
-        bookingName?: string;
-        price?: string;
-      }
-    >();
+    const map = new Map<string, CellMeta>();
 
-    // default available pricing
+    // Fill rate-based available tiles
     for (const r of rates) {
       eachDay(r.start_date, r.end_date).forEach((day) => {
         if (!map.has(day)) {
@@ -239,39 +238,32 @@ export default function AvailabilityPage() {
       });
     }
 
-    // bookings
+    // Apply bookings
     for (const b of bookings) {
       const bookedDays = eachDay(b.start_date, b.end_date);
       const bookingName = b.guest_name || (b.status === "confirmed" ? "Booked" : "Provisional");
 
       bookedDays.forEach((day, idx) => {
-        const base =
+        const state =
           b.status === "confirmed"
-            ? idx === 0
-              ? "confirmed-checkin"
-              : "confirmed"
-            : idx === 0
-            ? "provisional-checkin"
-            : "provisional";
+            ? (idx === 0 ? "confirmed-checkin" : "confirmed")
+            : (idx === 0 ? "provisional-checkin" : "provisional");
 
         map.set(day, {
-          state: base as CellState,
+          state,
           bookingName,
           price: getDailyDisplayPrice(day, rates),
         });
       });
 
       map.set(b.end_date, {
-        state:
-          b.status === "confirmed"
-            ? "confirmed-checkout"
-            : "provisional-checkout",
+        state: b.status === "confirmed" ? "confirmed-checkout" : "provisional-checkout",
         bookingName,
         price: getDailyDisplayPrice(b.end_date, rates),
       });
     }
 
-    // user selection overlays
+    // Apply user selection on top
     if (checkIn) {
       if (!checkOut) {
         map.set(checkIn, {
@@ -280,6 +272,7 @@ export default function AvailabilityPage() {
         });
       } else {
         const selectedDays = eachDay(checkIn, checkOut);
+
         selectedDays.forEach((day, idx) => {
           map.set(day, {
             ...(map.get(day) || { price: getDailyDisplayPrice(day, rates) }),
@@ -297,60 +290,34 @@ export default function AvailabilityPage() {
     return map;
   }, [bookings, rates, checkIn, checkOut]);
 
-  function dayCellDidMount(info: any) {
-    const day = info.dateStr;
-    const meta = cellMap.get(day);
-    if (!meta) return;
+  function dayCellClassNames(arg: any) {
+    const meta = cellMap.get(arg.dateStr);
+    if (!meta) return ["tile-frame", "tile-available"];
+    return ["tile-frame", `tile-${meta.state}`];
+  }
 
-    const frame = info.el.querySelector(".fc-daygrid-day-frame");
-    if (!frame) return;
+  function dayCellContent(arg: any) {
+    const meta = cellMap.get(arg.dateStr);
+    const dayNum = arg.dayNumberText.replace(/\D/g, "");
 
-    frame.classList.add("tile-frame");
-    frame.classList.add(`tile-${meta.state}`);
-
-    if (!frame.querySelector(".tile-price") && meta.price) {
-      const price = document.createElement("div");
-      price.className = "tile-price";
-      price.textContent = meta.price;
-      frame.appendChild(price);
-    }
-
-    const bookingStates = [
-      "confirmed",
-      "confirmed-checkin",
-      "confirmed-checkout",
-      "provisional",
-      "provisional-checkin",
-      "provisional-checkout",
-    ];
-
-    if (
-      bookingStates.includes(meta.state) &&
-      !frame.querySelector(".tile-booking-name") &&
-      meta.bookingName
-    ) {
-      const name = document.createElement("div");
-      name.className = "tile-booking-name";
-      name.textContent = meta.bookingName;
-      frame.appendChild(name);
-    }
-
-    if (
-      (meta.state === "selected" ||
-        meta.state === "selected-checkin" ||
-        meta.state === "selected-checkout") &&
-      !frame.querySelector(".tile-selected-label")
-    ) {
-      const label = document.createElement("div");
-      label.className = "tile-selected-label";
-      label.textContent =
-        meta.state === "selected-checkin"
-          ? "Check-in"
-          : meta.state === "selected-checkout"
-          ? "Checkout"
-          : "Selected";
-      frame.appendChild(label);
-    }
+    return (
+      <div className="tile-inner">
+        <div className="tile-day">{dayNum}</div>
+        {meta?.bookingName && (
+          <div className="tile-booking-name">{meta.bookingName}</div>
+        )}
+        {meta?.state === "selected-checkin" && (
+          <div className="tile-selected-label">Check-in</div>
+        )}
+        {meta?.state === "selected-checkout" && (
+          <div className="tile-selected-label">Checkout</div>
+        )}
+        {meta?.state === "selected" && (
+          <div className="tile-selected-label">Selected</div>
+        )}
+        {meta?.price && <div className="tile-price">{meta.price}</div>}
+      </div>
+    );
   }
 
   function requestBooking() {
@@ -398,26 +365,16 @@ export default function AvailabilityPage() {
           padding: 10px 0;
         }
 
+        .fc .fc-daygrid-day-top {
+          display: none !important;
+        }
+
         .fc .fc-daygrid-day-frame {
           min-height: 96px;
-          padding: 6px;
-          position: relative;
+          padding: 0 !important;
           border-radius: 0 !important;
           overflow: hidden;
           box-sizing: border-box;
-        }
-
-        .fc .fc-daygrid-day-number {
-          font-size: 18px;
-          font-weight: 800;
-          color: #ffffff;
-          text-decoration: none !important;
-          position: relative;
-          z-index: 3;
-        }
-
-        .fc .fc-day-other .fc-daygrid-day-number {
-          opacity: 0.4;
         }
 
         .tile-frame {
@@ -464,25 +421,32 @@ export default function AvailabilityPage() {
           background: linear-gradient(135deg, #5c8fce 0 49%, #5fa03e 51% 100%);
         }
 
-        .tile-price {
-          position: absolute;
-          bottom: 6px;
-          left: 6px;
-          font-size: 12px;
-          font-weight: 700;
-          color: rgba(255,255,255,0.85);
-          z-index: 3;
+        .tile-inner {
+          position: relative;
+          min-height: 96px;
+          padding: 8px;
+          box-sizing: border-box;
+        }
+
+        .tile-day {
+          font-size: 18px;
+          font-weight: 800;
+          color: #fff;
+          line-height: 1;
+        }
+
+        .fc .fc-day-other .tile-day {
+          opacity: 0.4;
         }
 
         .tile-booking-name {
           position: absolute;
-          top: 36px;
-          left: 6px;
-          right: 6px;
+          top: 34px;
+          left: 8px;
+          right: 8px;
           font-size: 11px;
           font-weight: 700;
           color: #fff;
-          z-index: 3;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -490,24 +454,29 @@ export default function AvailabilityPage() {
 
         .tile-selected-label {
           position: absolute;
-          top: 36px;
-          left: 6px;
-          right: 6px;
+          top: 34px;
+          left: 8px;
+          right: 8px;
           font-size: 11px;
           font-weight: 800;
           color: #fff;
-          z-index: 3;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
         }
 
-        .fc .fc-daygrid-event-harness,
-        .fc .fc-daygrid-event,
-        .fc .fc-daygrid-event-harness-abs {
-          display: none !important;
+        .tile-price {
+          position: absolute;
+          bottom: 8px;
+          left: 8px;
+          font-size: 12px;
+          font-weight: 700;
+          color: rgba(255,255,255,.88);
         }
 
+        .fc .fc-daygrid-event-harness,
+        .fc .fc-daygrid-event,
+        .fc .fc-daygrid-event-harness-abs,
         .fc .fc-daygrid-more-link {
           display: none !important;
         }
@@ -535,7 +504,8 @@ export default function AvailabilityPage() {
             height="auto"
             selectable={false}
             dateClick={onDateClick}
-            dayCellDidMount={dayCellDidMount}
+            dayCellClassNames={dayCellClassNames}
+            dayCellContent={dayCellContent}
             events={[]}
           />
         </div>
