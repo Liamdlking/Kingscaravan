@@ -10,20 +10,7 @@ type BookingEmailData = {
   guests?: number | string;
 };
 
-function canSendEmails() {
-  return (
-    !!process.env.RESEND_API_KEY &&
-    !!process.env.RESEND_FROM &&
-    !!process.env.OWNER_NOTIFICATION_EMAIL
-  );
-}
-
 export async function sendOwnerNotification(booking: BookingEmailData) {
-  if (!canSendEmails()) {
-    console.warn("Owner email not sent: missing Resend environment variables.");
-    return;
-  }
-
   try {
     await resend.emails.send({
       from: process.env.RESEND_FROM!,
@@ -43,11 +30,6 @@ export async function sendOwnerNotification(booking: BookingEmailData) {
 }
 
 export async function sendGuestApproval(booking: BookingEmailData) {
-  if (!process.env.RESEND_API_KEY || !process.env.RESEND_FROM) {
-    console.warn("Guest email not sent: missing Resend environment variables.");
-    return;
-  }
-
   try {
     await resend.emails.send({
       from: process.env.RESEND_FROM!,
