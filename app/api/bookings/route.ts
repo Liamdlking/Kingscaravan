@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "../../../lib/supabaseServer";
 import { overlaps } from "../../../lib/overlap";
-import { sendOwnerNotification } from "../../../lib/email";
+import { sendOwnerNotification, sendGuestApproval } from "../../../lib/email";
 
 type BookingRow = {
   id: string;
@@ -154,6 +154,17 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "id is required" }, { status: 400 });
   }
 
+  // Get existing booking first so we know if status changed
+  const { data: existingBooking, error: existingError } = await supabase
+    .from("bookings")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (existingError) {
+    return NextResponse.json({ error: existingError.message }, { status: 500 });
+  }
+
   const patch: Record<string, any> = {
     start_date: body.start_date,
     end_date: body.end_date,
@@ -183,6 +194,18 @@ export async function PATCH(req: Request) {
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // Send guest approval email only when moving to confirmed
+  const oldStatus = existingBooking?.status;
+  const newStatus = data?.status;
+
+  if (
+    oldStatus !== "confirmed" &&
+    newStatus === "confirmed" &&
+    data?.guest_email
+  ) {
+    await sendGuestApproval(data);
   }
 
   return NextResponse.json({ booking: data });
