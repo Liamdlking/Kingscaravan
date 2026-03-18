@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "../../../lib/supabaseServer";
 import { overlaps } from "../../../lib/overlap";
-import { sendOwnerNotification } from "../../../lib/email"; 
+import { sendOwnerNotification } from "../../../lib/email";
 
 type BookingRow = {
   id: string;
@@ -25,7 +25,7 @@ function isAuthorized(req: Request) {
   const auth = req.headers.get("authorization");
   const bearer = process.env.OWNER_API_TOKEN;
 
-  if (!bearer) return true; // avoids locking you out if token not set yet
+  if (!bearer) return true;
   if (!auth) return false;
 
   return auth === `Bearer ${bearer}`;
@@ -40,12 +40,11 @@ export async function GET() {
     .order("start_date", { ascending: true });
 
   if (error) {
-  return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ bookings: (data ?? []) as BookingRow[] });
 }
-
-await sendOwnerNotification(data);
-
-return NextResponse.json({ booking: data });
 
 export async function POST(req: Request) {
   const supabase = supabaseServer();
@@ -73,7 +72,6 @@ export async function POST(req: Request) {
   const vehicle_reg = body.vehicle_reg ? String(body.vehicle_reg) : null;
   const special_requests = body.special_requests ? String(body.special_requests) : null;
 
-  // public booking form defaults to provisional
   const requestedStatus = body.status ? String(body.status) : "provisional";
   const status: "provisional" | "confirmed" =
     requestedStatus === "confirmed" && isAuthorized(req) ? "confirmed" : "provisional";
@@ -137,6 +135,8 @@ export async function POST(req: Request) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  await sendOwnerNotification(data);
 
   return NextResponse.json({ booking: data });
 }
