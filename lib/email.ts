@@ -1,8 +1,29 @@
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY!);
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-export async function sendOwnerNotification(booking: any) {
+type BookingEmailData = {
+  name: string;
+  email: string;
+  check_in: string;
+  check_out: string;
+  guests?: number | string;
+};
+
+function canSendEmails() {
+  return (
+    !!process.env.RESEND_API_KEY &&
+    !!process.env.RESEND_FROM &&
+    !!process.env.OWNER_NOTIFICATION_EMAIL
+  );
+}
+
+export async function sendOwnerNotification(booking: BookingEmailData) {
+  if (!canSendEmails()) {
+    console.warn("Owner email not sent: missing Resend environment variables.");
+    return;
+  }
+
   try {
     await resend.emails.send({
       from: process.env.RESEND_FROM!,
@@ -13,15 +34,20 @@ export async function sendOwnerNotification(booking: any) {
         <p><strong>Name:</strong> ${booking.name}</p>
         <p><strong>Email:</strong> ${booking.email}</p>
         <p><strong>Dates:</strong> ${booking.check_in} → ${booking.check_out}</p>
-        <p><strong>Guests:</strong> ${booking.guests}</p>
+        <p><strong>Guests:</strong> ${booking.guests ?? "Not provided"}</p>
       `,
     });
-  } catch (err) {
-    console.error("Owner email failed:", err);
+  } catch (error) {
+    console.error("Owner email failed:", error);
   }
 }
 
-export async function sendGuestApproval(booking: any) {
+export async function sendGuestApproval(booking: BookingEmailData) {
+  if (!process.env.RESEND_API_KEY || !process.env.RESEND_FROM) {
+    console.warn("Guest email not sent: missing Resend environment variables.");
+    return;
+  }
+
   try {
     await resend.emails.send({
       from: process.env.RESEND_FROM!,
@@ -31,14 +57,12 @@ export async function sendGuestApproval(booking: any) {
         <h2>Booking Confirmed</h2>
         <p>Hi ${booking.name},</p>
         <p>Your booking has been approved 🎉</p>
-
         <p><strong>Check-in:</strong> ${booking.check_in}</p>
         <p><strong>Check-out:</strong> ${booking.check_out}</p>
-
         <p>We look forward to your stay at Kings Caravan.</p>
       `,
     });
-  } catch (err) {
-    console.error("Guest email failed:", err);
+  } catch (error) {
+    console.error("Guest email failed:", error);
   }
 }
