@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "../../../lib/supabaseServer";
 import { overlaps } from "../../../lib/overlap";
+import { sendOwnerNotification } from "../../../lib/email"; 
 
 type BookingRow = {
   id: string;
@@ -39,11 +40,12 @@ export async function GET() {
     .order("start_date", { ascending: true });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ bookings: (data ?? []) as BookingRow[] });
+  return NextResponse.json({ error: error.message }, { status: 500 });
 }
+
+await sendOwnerNotification(data);
+
+return NextResponse.json({ booking: data });
 
 export async function POST(req: Request) {
   const supabase = supabaseServer();
