@@ -17,45 +17,59 @@ export function middleware(req: NextRequest) {
   // Public API endpoints
   const isLoginApi = pathname.startsWith("/api/login");
 
-  // Bookings API: allow GET for availability, block writes unless owner
+  // Bookings API
   const isBookingsApi = pathname.startsWith("/api/bookings");
 
   // Import API: owner only
   const isImportApi = pathname.startsWith("/api/import");
 
   // Owner-only pages
-  const isOwnerPage = pathname === "/" || pathname.startsWith("/import");
+  const isOwnerPage =
+    pathname === "/" ||
+    pathname.startsWith("/import");
 
   const owner = req.cookies.get("owner")?.value === "1";
 
   // Always allow Next internal / assets
-  if (pathname.startsWith("/_next")) return NextResponse.next();
+  if (pathname.startsWith("/_next")) {
+    return NextResponse.next();
+  }
 
   // Allow login endpoint
-  if (isLoginApi) return NextResponse.next();
+  if (isLoginApi) {
+    return NextResponse.next();
+  }
 
-// BOOKINGS API rule
-// Public can view availability and submit booking requests.
-// Admin-only actions are protected inside app/api/bookings/route.ts.
-if (isBookingsApi) {
-  return NextResponse.next();
-}
+  // BOOKINGS API rule
+  // Public can view availability and submit booking requests.
+  // Admin-only actions are protected inside app/api/bookings/route.ts.
+  if (isBookingsApi) {
+    return NextResponse.next();
   }
 
   // IMPORT API rule
   if (isImportApi) {
-    if (!owner) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!owner) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
     return NextResponse.next();
   }
 
   // Public pages
-  if (isPublicPage) return NextResponse.next();
+  if (isPublicPage) {
+    return NextResponse.next();
+  }
 
   // Owner pages require login
   if (isOwnerPage && !owner) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
+
     return NextResponse.redirect(url);
   }
 
