@@ -2,15 +2,13 @@ import { Resend } from "resend";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-type BookingEmailData = {
-  name: string;
-  email: string;
-  check_in: string;
-  check_out: string;
-  guests?: number | string;
-};
+export async function sendOwnerNotification(booking: any) {
+  const name = booking.name ?? booking.guest_name ?? "Not provided";
+  const email = booking.email ?? booking.guest_email ?? booking.contact ?? "Not provided";
+  const checkIn = booking.check_in ?? booking.start_date ?? "Not provided";
+  const checkOut = booking.check_out ?? booking.end_date ?? "Not provided";
+  const guests = booking.guests ?? booking.guests_count ?? "Not provided";
 
-export async function sendOwnerNotification(booking: BookingEmailData) {
   try {
     await resend.emails.send({
       from: process.env.RESEND_FROM!,
@@ -18,10 +16,10 @@ export async function sendOwnerNotification(booking: BookingEmailData) {
       subject: "📅 New Booking Request",
       html: `
         <h2>New Booking Request</h2>
-        <p><strong>Name:</strong> ${booking.name}</p>
-        <p><strong>Email:</strong> ${booking.email}</p>
-        <p><strong>Dates:</strong> ${booking.check_in} → ${booking.check_out}</p>
-        <p><strong>Guests:</strong> ${booking.guests ?? "Not provided"}</p>
+        <p><strong>Name:</strong> ${name}</p>
+        <p><strong>Email:</strong> ${email}</p>
+        <p><strong>Dates:</strong> ${checkIn} → ${checkOut}</p>
+        <p><strong>Guests:</strong> ${guests}</p>
       `,
     });
   } catch (error) {
@@ -29,18 +27,25 @@ export async function sendOwnerNotification(booking: BookingEmailData) {
   }
 }
 
-export async function sendGuestApproval(booking: BookingEmailData) {
+export async function sendGuestApproval(booking: any) {
+  const name = booking.name ?? booking.guest_name ?? "Guest";
+  const email = booking.email ?? booking.guest_email;
+  const checkIn = booking.check_in ?? booking.start_date ?? "Not provided";
+  const checkOut = booking.check_out ?? booking.end_date ?? "Not provided";
+
+  if (!email) return;
+
   try {
     await resend.emails.send({
       from: process.env.RESEND_FROM!,
-      to: booking.email,
+      to: email,
       subject: "🎉 Your Booking is Confirmed!",
       html: `
         <h2>Booking Confirmed</h2>
-        <p>Hi ${booking.name},</p>
+        <p>Hi ${name},</p>
         <p>Your booking has been approved 🎉</p>
-        <p><strong>Check-in:</strong> ${booking.check_in}</p>
-        <p><strong>Check-out:</strong> ${booking.check_out}</p>
+        <p><strong>Check-in:</strong> ${checkIn}</p>
+        <p><strong>Check-out:</strong> ${checkOut}</p>
         <p>We look forward to your stay at Kings Caravan.</p>
       `,
     });
