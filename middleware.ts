@@ -34,11 +34,12 @@ export function middleware(req: NextRequest) {
   // Allow login endpoint
   if (isLoginApi) return NextResponse.next();
 
-  // BOOKINGS API rule
-  if (isBookingsApi) {
-    if (req.method === "GET") return NextResponse.next();
-    if (!owner) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    return NextResponse.next();
+// BOOKINGS API rule
+// Public can view availability and submit booking requests.
+// Admin-only actions are protected inside app/api/bookings/route.ts.
+if (isBookingsApi) {
+  return NextResponse.next();
+}
   }
 
   // IMPORT API rule
