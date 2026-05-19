@@ -176,7 +176,7 @@ By submitting this request, you confirm you have read and agree to these Terms &
       if (!res.ok) throw new Error(json?.error || "Could not submit request");
 
       setMsg("✅ Request sent! We’ll review and confirm availability.");
-      e.currentTarget.reset();
+      (e.target as HTMLFormElement).reset();
 
       // keep dates/price if you want, otherwise reset
       if (startPrefill) (e.currentTarget.elements.namedItem("start_date") as HTMLInputElement).value = startPrefill;
