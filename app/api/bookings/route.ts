@@ -136,7 +136,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  await sendOwnerNotification(data);
+  await sendOwnerNotification({
+  name: data.guest_name ?? "Unknown guest",
+  email: data.guest_email ?? data.contact ?? "No email provided",
+  check_in: data.start_date,
+  check_out: data.end_date,
+  guests: data.guests_count ?? "Not provided",
+});
 
   return NextResponse.json({ booking: data });
 }
