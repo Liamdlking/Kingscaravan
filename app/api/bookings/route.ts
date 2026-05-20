@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "../../../lib/supabaseServer";
 import { overlaps } from "../../../lib/overlap";
-import { sendOwnerNotification, sendGuestApproval } from "../../../lib/email";
+import {
+  sendOwnerNotification,
+  sendGuestPaymentDetails,
+  sendGuestBookingConfirmed,
+} from "../../../lib/email";
 
 type BookingRow = {
   id: string;
