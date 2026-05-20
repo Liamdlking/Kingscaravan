@@ -66,7 +66,7 @@ export async function POST(req: Request) {
   const start_date = String(body.start_date || "");
   const end_date = String(body.end_date || "");
   const guest_name = body.guest_name ? String(body.guest_name) : null;
-  const guest_email = body.guest_email ? String(body.guest_email) : null;
+  const guest_email: body.guest_email === "" ? existingBooking.guest_email : body.guest_email,
   const phone = body.phone ? String(body.phone) : null;
   const contact = body.contact ? String(body.contact) : null;
   const notes = body.notes ? String(body.notes) : null;
