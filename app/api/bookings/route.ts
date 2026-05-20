@@ -66,33 +66,41 @@ export async function POST(req: Request) {
   const start_date = String(body.start_date || "");
   const end_date = String(body.end_date || "");
   const guest_name = body.guest_name ? String(body.guest_name) : null;
-  const guest_email: body.guest_email === "" ? existingBooking.guest_email : body.guest_email,
+  const guest_email = body.guest_email ? String(body.guest_email) : null;
   const phone = body.phone ? String(body.phone) : null;
   const contact = body.contact ? String(body.contact) : null;
   const notes = body.notes ? String(body.notes) : null;
 
   const guests_count =
-    body.guests_count === undefined || body.guests_count === null || body.guests_count === ""
+    body.guests_count === undefined ||
+    body.guests_count === null ||
+    body.guests_count === ""
       ? null
       : Number(body.guests_count);
 
   const children_count =
-    body.children_count === undefined || body.children_count === null || body.children_count === ""
+    body.children_count === undefined ||
+    body.children_count === null ||
+    body.children_count === ""
       ? null
       : Number(body.children_count);
 
   const dogs_count =
-    body.dogs_count === undefined || body.dogs_count === null || body.dogs_count === ""
+    body.dogs_count === undefined ||
+    body.dogs_count === null ||
+    body.dogs_count === ""
       ? null
       : Number(body.dogs_count);
 
   const vehicle_reg = body.vehicle_reg ? String(body.vehicle_reg) : null;
-  const special_requests = body.special_requests ? String(body.special_requests) : null;
+  const special_requests = body.special_requests
+    ? String(body.special_requests)
+    : null;
 
-  // Public requests should always start as requested.
-  // Only an authorised owner can create provisional/booked/cancelled directly.
   const requestedStatus = normalizeStatus(body.status);
-  const status: BookingStatus = isAuthorized(req) ? requestedStatus : "requested";
+  const status: BookingStatus = isAuthorized(req)
+    ? requestedStatus
+    : "requested";
 
   if (!start_date || !end_date) {
     return NextResponse.json(
@@ -193,11 +201,18 @@ export async function PATCH(req: Request) {
   const patch: Record<string, any> = {
     start_date: body.start_date,
     end_date: body.end_date,
-    status: body.status === undefined ? undefined : normalizeStatus(body.status),
+    status:
+      body.status === undefined ? undefined : normalizeStatus(body.status),
     guest_name: body.guest_name,
-    guest_email: body.guest_email,
-    phone: body.phone,
-    contact: body.contact,
+    guest_email:
+      body.guest_email === "" || body.guest_email === undefined
+        ? existingBooking.guest_email
+        : body.guest_email,
+    phone: body.phone === "" || body.phone === undefined ? existingBooking.phone : body.phone,
+    contact:
+      body.contact === "" || body.contact === undefined
+        ? existingBooking.contact
+        : body.contact,
     notes: body.notes,
     guests_count: body.guests_count,
     children_count: body.children_count,
@@ -224,19 +239,11 @@ export async function PATCH(req: Request) {
   const oldStatus = normalizeStatus(existingBooking?.status);
   const newStatus = normalizeStatus(data?.status);
 
-  if (
-    oldStatus !== "provisional" &&
-    newStatus === "provisional" &&
-    data?.guest_email
-  ) {
+  if (oldStatus !== "provisional" && newStatus === "provisional") {
     await sendGuestPaymentDetails(data);
   }
 
-  if (
-    oldStatus !== "booked" &&
-    newStatus === "booked" &&
-    data?.guest_email
-  ) {
+  if (oldStatus !== "booked" && newStatus === "booked") {
     await sendGuestBookingConfirmed(data);
   }
 
