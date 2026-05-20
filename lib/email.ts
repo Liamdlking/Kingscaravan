@@ -66,9 +66,9 @@ export async function sendGuestPaymentDetails(booking: any) {
 
         <h3>Bank details</h3>
         <p>
-          <strong>Account name:</strong> YOUR NAME<br />
-          <strong>Sort code:</strong> 00-00-00<br />
-          <strong>Account number:</strong> 00000000<br />
+          <strong>Account name:</strong> Liam King<br />
+          <strong>Sort code:</strong> 40-11-92<br />
+          <strong>Account number:</strong> 15338344<br />
           <strong>Reference:</strong> ${b.name}
         </p>
 
