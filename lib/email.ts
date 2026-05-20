@@ -4,6 +4,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 function formatDate(date?: string | null) {
   if (!date) return "Not provided";
+
   return new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", {
     weekday: "short",
     day: "2-digit",
@@ -28,13 +29,24 @@ export async function sendOwnerNotification(booking: any) {
   try {
     await resend.emails.send({
       from: process.env.RESEND_FROM!,
+      replyTo: "Liamking1996@hotmail.com",
       to: process.env.OWNER_NOTIFICATION_EMAIL!,
       subject: "📅 New Booking Request",
       html: `
         <h2>New Booking Request</h2>
+
         <p><strong>Name:</strong> ${b.name}</p>
-        <p><strong>Email:</strong> ${b.email || "Not provided"}</p>
-        <p><strong>Dates:</strong> ${formatDate(b.checkIn)} → ${formatDate(b.checkOut)}</p>
+
+        <p><strong>Email:</strong> ${
+          b.email || "Not provided"
+        }</p>
+
+        <p>
+          <strong>Dates:</strong>
+          ${formatDate(b.checkIn)} →
+          ${formatDate(b.checkOut)}
+        </p>
+
         <p><strong>Guests:</strong> ${b.guests}</p>
       `,
     });
@@ -45,36 +57,62 @@ export async function sendOwnerNotification(booking: any) {
 
 export async function sendGuestPaymentDetails(booking: any) {
   const b = getBookingData(booking);
+
   if (!b.email) return;
 
   try {
     await resend.emails.send({
       from: process.env.RESEND_FROM!,
+      replyTo: "Liamking1996@hotmail.com",
       to: b.email,
       subject: "Your Kings Caravan booking request - payment details",
       html: `
-        <h2>Your booking request has been provisionally accepted</h2>
-        <p>Hi ${b.name},</p>
+        <div style="font-family: Arial, sans-serif; line-height: 1.6;">
 
-        <p>Thank you for your booking request for Kings Caravan.</p>
+          <h2>Your booking request has been provisionally accepted</h2>
 
-        <p>Your dates have been provisionally held:</p>
-        <p><strong>Check-in:</strong> ${formatDate(b.checkIn)}</p>
-        <p><strong>Check-out:</strong> ${formatDate(b.checkOut)}</p>
+          <p>Hi ${b.name},</p>
 
-        <p>To secure the booking, please make payment using the bank details below:</p>
+          <p>
+            Thank you for your booking request for Kings Caravan.
+          </p>
 
-        <h3>Bank details</h3>
-        <p>
-          <strong>Account name:</strong> Liam King<br />
-          <strong>Sort code:</strong> 40-11-92<br />
-          <strong>Account number:</strong> 15338344<br />
-          <strong>Reference:</strong> ${b.name}
-        </p>
+          <p>Your dates have been provisionally held:</p>
 
-        <p>Once payment has been received, your booking will be confirmed and we’ll send the full stay information.</p>
+          <p>
+            <strong>Check-in:</strong>
+            ${formatDate(b.checkIn)}
+          </p>
 
-        <p>Many thanks,<br />Kings Caravan</p>
+          <p>
+            <strong>Check-out:</strong>
+            ${formatDate(b.checkOut)}
+          </p>
+
+          <p>
+            To secure the booking, please make payment using the bank details below:
+          </p>
+
+          <h3>Bank details</h3>
+
+          <p>
+            <strong>Account name:</strong> Liam King<br />
+            <strong>Sort code:</strong> 40-11-92<br />
+            <strong>Account number:</strong> 15338344<br />
+            <strong>Reference:</strong> ${b.name}
+          </p>
+
+          <p>
+            Once payment has been received, your booking will be confirmed
+            and we’ll send the full stay information.
+          </p>
+
+          <p>
+            Many thanks,<br />
+            Kings Caravan
+          </p>
+
+        </div>
       `,
     });
   } catch (error) {
@@ -84,38 +122,72 @@ export async function sendGuestPaymentDetails(booking: any) {
 
 export async function sendGuestBookingConfirmed(booking: any) {
   const b = getBookingData(booking);
+
   if (!b.email) return;
 
   try {
     await resend.emails.send({
       from: process.env.RESEND_FROM!,
+      replyTo: "Liamking1996@hotmail.com",
       to: b.email,
       subject: "🎉 Your Kings Caravan booking is confirmed",
       html: `
-        <h2>Your booking is confirmed</h2>
-        <p>Hi ${b.name},</p>
+        <div style="font-family: Arial, sans-serif; line-height: 1.6;">
 
-        <p>We’ve received your payment and your booking is now confirmed.</p>
+          <h2>Your booking is confirmed</h2>
 
-        <p><strong>Check-in:</strong> ${formatDate(b.checkIn)}</p>
-        <p><strong>Check-out:</strong> ${formatDate(b.checkOut)}</p>
-        <p><strong>Guests:</strong> ${b.guests}</p>
+          <p>Hi ${b.name},</p>
 
-        <h3>Before your stay</h3>
-        <p>Please make sure all guests are aware of the caravan rules and site expectations.</p>
+          <p>
+            We’ve received your payment and your booking is now confirmed.
+          </p>
 
-        <h3>Arrival information</h3>
-        <p>Full arrival details, key information, parking and site information will be provided before your stay.</p>
+          <p>
+            <strong>Check-in:</strong>
+            ${formatDate(b.checkIn)}
+          </p>
 
-        <p>We look forward to welcoming you to Kings Caravan.</p>
+          <p>
+            <strong>Check-out:</strong>
+            ${formatDate(b.checkOut)}
+          </p>
 
-        <p>Many thanks,<br />Kings Caravan</p>
+          <p>
+            <strong>Guests:</strong>
+            ${b.guests}
+          </p>
+
+          <h3>Before your stay</h3>
+
+          <p>
+            Please make sure all guests are aware of the caravan rules
+            and site expectations.
+          </p>
+
+          <h3>Arrival information</h3>
+
+          <p>
+            Full arrival details, key information, parking and site
+            information will be provided before your stay.
+          </p>
+
+          <p>
+            We look forward to welcoming you to Kings Caravan.
+          </p>
+
+          <p>
+            Many thanks,<br />
+            Kings Caravan
+          </p>
+
+        </div>
       `,
     });
   } catch (error) {
     console.error("Guest confirmation email failed:", error);
   }
 }
+
 export async function sendCustomGuestEmail({
   to,
   subject,
@@ -130,12 +202,19 @@ export async function sendCustomGuestEmail({
   try {
     await resend.emails.send({
       from: process.env.RESEND_FROM!,
+      replyTo: "Liamking1996@hotmail.com",
       to,
       subject,
       html: `
-        <div style="font-family: Arial, sans-serif; line-height: 1.5;">
+        <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+
           ${message.replace(/\n/g, "<br />")}
-          <p>Many thanks,<br />Kings Caravan</p>
+
+          <p style="margin-top: 24px;">
+            Many thanks,<br />
+            Kings Caravan
+          </p>
+
         </div>
       `,
     });
