@@ -14,12 +14,10 @@ export async function POST(req: Request) {
 
     // Keep uploads small for now so Vercel/Supabase does not hang
     const maxSize = 7 * 1024 * 1024; // 7MB
-    if (file.size > maxSize) {
-      return NextResponse.json(
-        { error: "File is too large. Please upload a file under 5MB." },
-        { status: 400 }
-      );
-    }
+    if (file.size > 7 * 1024 * 1024) {
+  setCustomEmailStatus("File is too large. Please upload a file under 7MB.");
+  return;
+}
 
     const supabase = supabaseServer();
 
