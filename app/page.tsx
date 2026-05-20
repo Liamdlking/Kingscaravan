@@ -158,6 +158,11 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [editor, setEditor] = useState<Editor>(null);
 
+  const [customSubject, setCustomSubject] = useState("");
+  const [customMessage, setCustomMessage] = useState("");
+  const [customEmailStatus, setCustomEmailStatus] = useState("");
+  const [sendingCustomEmail, setSendingCustomEmail] = useState(false);
+
   async function loadAll() {
     setLoading(true);
 
@@ -260,6 +265,9 @@ export default function Dashboard() {
     if (mode === "bookings") {
       const booking = findBookingForDay(day);
       if (booking) {
+        setCustomSubject("");
+        setCustomMessage("");
+        setCustomEmailStatus("");
         setEditor({
           type: "booking",
           booking,
@@ -321,6 +329,47 @@ export default function Dashboard() {
 
     setEditor(null);
     await loadAll();
+  }
+
+  async function sendCustomEmail() {
+    if (!editor || editor.type !== "booking") return;
+
+    const to = String(editor.draft.guest_email ?? editor.booking.guest_email ?? "");
+
+    if (!to) {
+      setCustomEmailStatus("No guest email address found.");
+      return;
+    }
+
+    if (!customSubject.trim() || !customMessage.trim()) {
+      setCustomEmailStatus("Please add a subject and message.");
+      return;
+    }
+
+    setSendingCustomEmail(true);
+    setCustomEmailStatus("");
+
+    const res = await fetch("/api/send-custom-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to,
+        subject: customSubject,
+        message: customMessage,
+      }),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      setCustomEmailStatus(json?.error || "Could not send email.");
+    } else {
+      setCustomEmailStatus("✅ Email sent.");
+      setCustomSubject("");
+      setCustomMessage("");
+    }
+
+    setSendingCustomEmail(false);
   }
 
   async function deleteBooking(id: string) {
@@ -751,13 +800,16 @@ export default function Dashboard() {
                   return (
                     <button
                       key={b.id}
-                      onClick={() =>
+                      onClick={() => {
+                        setCustomSubject("");
+                        setCustomMessage("");
+                        setCustomEmailStatus("");
                         setEditor({
                           type: "booking",
                           booking: b,
                           draft: { ...b, status },
-                        })
-                      }
+                        });
+                      }}
                       style={{
                         textAlign: "left",
                         width: "100%",
@@ -1085,6 +1137,44 @@ export default function Dashboard() {
                 />
               </Field>
 
+              <div style={styles.hr} />
+
+              <div style={{ fontWeight: 900, marginTop: 12 }}>
+                Send custom guest email
+              </div>
+
+              <Field label="Subject">
+                <input
+                  style={styles.input}
+                  value={customSubject}
+                  onChange={(e) => setCustomSubject(e.target.value)}
+                  placeholder="e.g. Information about your stay"
+                />
+              </Field>
+
+              <Field label="Message">
+                <textarea
+                  style={{ ...styles.input, minHeight: 120, resize: "vertical" }}
+                  value={customMessage}
+                  onChange={(e) => setCustomMessage(e.target.value)}
+                  placeholder="Type your message to the guest here..."
+                />
+              </Field>
+
+              <button
+                style={{ ...styles.primaryBtn, marginTop: 10, width: "100%" }}
+                onClick={sendCustomEmail}
+                disabled={sendingCustomEmail}
+              >
+                {sendingCustomEmail ? "Sending…" : "Send custom email"}
+              </button>
+
+              {customEmailStatus && (
+                <div style={styles.message}>
+                  {customEmailStatus}
+                </div>
+              )}
+
               {editor.err && <div style={styles.err}>{editor.err}</div>}
 
               <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
@@ -1195,6 +1285,14 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #ffd0d0",
     background: "#fff3f3",
     color: "#b91c1c",
+    fontWeight: 700,
+  },
+  message: {
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 10,
+    border: "1px solid #e6e6e6",
+    background: "#f9fafb",
     fontWeight: 700,
   },
 };
