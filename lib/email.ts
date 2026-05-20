@@ -29,7 +29,7 @@ export async function sendOwnerNotification(booking: any) {
   try {
     await resend.emails.send({
       from: process.env.RESEND_FROM!,
-      replyTo: "Liamking1996@hotmail.com",
+      reply_to: "Liamking1996@hotmail.com",
       to: process.env.OWNER_NOTIFICATION_EMAIL!,
       subject: "📅 New Booking Request",
       html: `
@@ -63,7 +63,7 @@ export async function sendGuestPaymentDetails(booking: any) {
   try {
     await resend.emails.send({
       from: process.env.RESEND_FROM!,
-      replyTo: "Liamking1996@hotmail.com",
+      reply_to: "Liamking1996@hotmail.com",
       to: b.email,
       subject: "Your Kings Caravan booking request - payment details",
       html: `
@@ -128,7 +128,7 @@ export async function sendGuestBookingConfirmed(booking: any) {
   try {
     await resend.emails.send({
       from: process.env.RESEND_FROM!,
-      replyTo: "Liamking1996@hotmail.com",
+      reply_to: "Liamking1996@hotmail.com",
       to: b.email,
       subject: "🎉 Your Kings Caravan booking is confirmed",
       html: `
@@ -202,7 +202,7 @@ export async function sendCustomGuestEmail({
   try {
     await resend.emails.send({
       from: process.env.RESEND_FROM!,
-      replyTo: "Liamking1996@hotmail.com",
+      reply_to: "Liamking1996@hotmail.com",
       to,
       subject,
       html: `
