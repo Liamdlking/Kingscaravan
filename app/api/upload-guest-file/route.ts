@@ -9,19 +9,26 @@ export async function POST(req: Request) {
     const file = formData.get("file") as File | null;
 
     if (!file) {
-      return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+      return NextResponse.json(
+        { error: "No file uploaded" },
+        { status: 400 }
+      );
     }
 
-    // Keep uploads small for now so Vercel/Supabase does not hang
-    const maxSize = 7 * 1024 * 1024; // 7MB
-    if (file.size > 7 * 1024 * 1024) {
-  setCustomEmailStatus("File is too large. Please upload a file under 7MB.");
-  return;
-}
+    // 7MB limit
+    const maxSize = 7 * 1024 * 1024;
+
+    if (file.size > maxSize) {
+      return NextResponse.json(
+        { error: "File is too large. Please upload a file under 7MB." },
+        { status: 400 }
+      );
+    }
 
     const supabase = supabaseServer();
 
     const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, "-");
+
     const fileName = `${Date.now()}-${safeName}`;
 
     const arrayBuffer = await file.arrayBuffer();
@@ -35,7 +42,11 @@ export async function POST(req: Request) {
 
     if (error) {
       console.error("Supabase upload error:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500 }
+      );
     }
 
     const { data } = supabase.storage
@@ -47,8 +58,10 @@ export async function POST(req: Request) {
       name: file.name,
       url: data.publicUrl,
     });
+
   } catch (err: any) {
     console.error("Upload route failed:", err);
+
     return NextResponse.json(
       { error: err?.message || "Upload failed" },
       { status: 500 }
