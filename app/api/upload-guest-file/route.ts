@@ -13,7 +13,7 @@ export async function POST(req: Request) {
     }
 
     // Keep uploads small for now so Vercel/Supabase does not hang
-    const maxSize = 5 * 1024 * 1024; // 5MB
+    const maxSize = 7 * 1024 * 1024; // 7MB
     if (file.size > maxSize) {
       return NextResponse.json(
         { error: "File is too large. Please upload a file under 5MB." },
