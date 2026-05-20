@@ -35,9 +35,26 @@ type Rate = {
   note?: string | null;
 };
 
+type UploadedFile = {
+  name: string;
+  url: string;
+};
+
 type Editor =
-  | { type: "booking"; booking: Booking; draft: Partial<Booking>; saving?: boolean; err?: string }
-  | { type: "rate"; rate: Rate; draft: Partial<Rate>; saving?: boolean; err?: string }
+  | {
+      type: "booking";
+      booking: Booking;
+      draft: Partial<Booking>;
+      saving?: boolean;
+      err?: string;
+    }
+  | {
+      type: "rate";
+      rate: Rate;
+      draft: Partial<Rate>;
+      saving?: boolean;
+      err?: string;
+    }
   | null;
 
 type TileState =
@@ -75,9 +92,11 @@ function eachDay(startISO: string, endISO: string) {
   const out: string[] = [];
   const start = new Date(`${startISO}T00:00:00`);
   const end = new Date(`${endISO}T00:00:00`);
+
   for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
     out.push(isoLocal(d));
   }
+
   return out;
 }
 
@@ -101,13 +120,24 @@ function normaliseStatus(status?: string | null): BookingStatus {
   return "requested";
 }
 
-function calcBookingPrice(startISO: string, endISO: string, rates: Rate[]) {
+function calcBookingPrice(
+  startISO: string,
+  endISO: string,
+  rates: Rate[]
+) {
   const exactTotal = rates.find(
-    (r) => r.rate_type === "total" && r.start_date === startISO && r.end_date === endISO
+    (r) =>
+      r.rate_type === "total" &&
+      r.start_date === startISO &&
+      r.end_date === endISO
   );
 
   if (exactTotal) {
-    return { ok: true as const, total: Number(exactTotal.price), method: "total" as const };
+    return {
+      ok: true as const,
+      total: Number(exactTotal.price),
+      method: "total" as const,
+    };
   }
 
   const nights = eachDay(startISO, endISO);
@@ -115,34 +145,59 @@ function calcBookingPrice(startISO: string, endISO: string, rates: Rate[]) {
 
   for (const day of nights) {
     const nightly = rates.find(
-      (r) => r.rate_type === "nightly" && r.start_date <= day && day < r.end_date
+      (r) =>
+        r.rate_type === "nightly" &&
+        r.start_date <= day &&
+        day < r.end_date
     );
 
     if (!nightly) {
-      return { ok: false as const, total: null, method: "missing" as const };
+      return {
+        ok: false as const,
+        total: null,
+        method: "missing" as const,
+      };
     }
 
     total += Number(nightly.price);
   }
 
-  return { ok: true as const, total, method: "nightly" as const };
+  return {
+    ok: true as const,
+    total,
+    method: "nightly" as const,
+  };
 }
 
 function getDailyDisplayPrice(day: string, rates: Rate[]) {
   const nightly = rates.find(
-    (r) => r.rate_type === "nightly" && r.start_date <= day && day < r.end_date
+    (r) =>
+      r.rate_type === "nightly" &&
+      r.start_date <= day &&
+      day < r.end_date
   );
+
   if (nightly) return `£${Number(nightly.price)}`;
 
   const total = rates.find(
-    (r) => r.rate_type === "total" && r.start_date <= day && day < r.end_date
+    (r) =>
+      r.rate_type === "total" &&
+      r.start_date <= day &&
+      day < r.end_date
   );
+
   if (total) return `£${Number(total.price)}`;
 
   return "";
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <label style={{ display: "grid", gap: 6, marginTop: 10 }}>
       <span style={{ fontSize: 12, opacity: 0.75 }}>{label}</span>
@@ -162,6 +217,8 @@ export default function Dashboard() {
   const [customMessage, setCustomMessage] = useState("");
   const [customEmailStatus, setCustomEmailStatus] = useState("");
   const [sendingCustomEmail, setSendingCustomEmail] = useState(false);
+const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+const [uploadingFile, setUploadingFile] = useState(false);
 
   async function loadAll() {
     setLoading(true);
@@ -330,7 +387,40 @@ export default function Dashboard() {
     setEditor(null);
     await loadAll();
   }
+async function uploadGuestFile(file: File) {
+  setUploadingFile(true);
+  setCustomEmailStatus("");
 
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch("/api/upload-guest-file", {
+    method: "POST",
+    body: formData,
+  });
+
+  const json = await res.json();
+
+  if (!res.ok) {
+    setCustomEmailStatus(json?.error || "Could not upload file.");
+  } else {
+    const uploaded = {
+      name: json.name,
+      url: json.url,
+    };
+
+    setUploadedFiles((prev) => [...prev, uploaded]);
+
+    setCustomMessage((prev) =>
+      `${prev}
+
+Attached file: ${uploaded.name}
+${uploaded.url}`.trim()
+    );
+  }
+
+  setUploadingFile(false);
+}
   async function sendCustomEmail() {
     if (!editor || editor.type !== "booking") return;
 
@@ -804,6 +894,7 @@ export default function Dashboard() {
                         setCustomSubject("");
                         setCustomMessage("");
                         setCustomEmailStatus("");
+setUploadedFiles([]);
                         setEditor({
                           type: "booking",
                           booking: b,
@@ -1160,6 +1251,34 @@ export default function Dashboard() {
                   placeholder="Type your message to the guest here..."
                 />
               </Field>
+<Field label="Attach file">
+  <input
+    style={styles.input}
+    type="file"
+    onChange={(e) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        uploadGuestFile(file);
+      }
+    }}
+  />
+</Field>
+
+{uploadingFile && (
+  <div style={styles.message}>
+    Uploading file…
+  </div>
+)}
+
+{uploadedFiles.length > 0 && (
+  <div style={styles.message}>
+    {uploadedFiles.map((file) => (
+      <div key={file.url}>
+        ✅ {file.name}
+      </div>
+    ))}
+  </div>
+)}
 
               <button
                 style={{ ...styles.primaryBtn, marginTop: 10, width: "100%" }}
