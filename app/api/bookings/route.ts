@@ -7,11 +7,13 @@ import {
   sendGuestBookingConfirmed,
 } from "../../../lib/email";
 
+type BookingStatus = "requested" | "provisional" | "booked" | "cancelled";
+
 type BookingRow = {
   id: string;
   start_date: string;
-  end_date: string; // checkout day
-  status: "provisional" | "confirmed";
+  end_date: string;
+  status: BookingStatus;
   guest_name: string | null;
   guest_email: string | null;
   phone: string | null;
@@ -33,6 +35,13 @@ function isAuthorized(req: Request) {
   if (!auth) return false;
 
   return auth === `Bearer ${bearer}`;
+}
+
+function normalizeStatus(status: unknown): BookingStatus {
+  if (status === "booked" || status === "confirmed") return "booked";
+  if (status === "provisional") return "provisional";
+  if (status === "cancelled") return "cancelled";
+  return "requested";
 }
 
 export async function GET() {
@@ -61,24 +70,29 @@ export async function POST(req: Request) {
   const phone = body.phone ? String(body.phone) : null;
   const contact = body.contact ? String(body.contact) : null;
   const notes = body.notes ? String(body.notes) : null;
+
   const guests_count =
     body.guests_count === undefined || body.guests_count === null || body.guests_count === ""
       ? null
       : Number(body.guests_count);
+
   const children_count =
     body.children_count === undefined || body.children_count === null || body.children_count === ""
       ? null
       : Number(body.children_count);
+
   const dogs_count =
     body.dogs_count === undefined || body.dogs_count === null || body.dogs_count === ""
       ? null
       : Number(body.dogs_count);
+
   const vehicle_reg = body.vehicle_reg ? String(body.vehicle_reg) : null;
   const special_requests = body.special_requests ? String(body.special_requests) : null;
 
-  const requestedStatus = body.status ? String(body.status) : "provisional";
-  const status: "provisional" | "confirmed" =
-    requestedStatus === "confirmed" && isAuthorized(req) ? "confirmed" : "provisional";
+  // Public requests should always start as requested.
+  // Only an authorised owner can create provisional/booked/cancelled directly.
+  const requestedStatus = normalizeStatus(body.status);
+  const status: BookingStatus = isAuthorized(req) ? requestedStatus : "requested";
 
   if (!start_date || !end_date) {
     return NextResponse.json(
@@ -97,12 +111,14 @@ export async function POST(req: Request) {
 
   const newBooking = { start_date, end_date };
 
-  const conflict = (existing ?? []).some((b: any) =>
-    overlaps(newBooking as any, {
-      start_date: b.start_date,
-      end_date: b.end_date,
-    } as any)
-  );
+  const conflict = (existing ?? [])
+    .filter((b: any) => normalizeStatus(b.status) !== "cancelled")
+    .some((b: any) =>
+      overlaps(newBooking as any, {
+        start_date: b.start_date,
+        end_date: b.end_date,
+      } as any)
+    );
 
   if (conflict) {
     return NextResponse.json(
@@ -141,12 +157,12 @@ export async function POST(req: Request) {
   }
 
   await sendOwnerNotification({
-  name: data.guest_name ?? "Unknown guest",
-  email: data.guest_email ?? data.contact ?? "No email provided",
-  check_in: data.start_date,
-  check_out: data.end_date,
-  guests: data.guests_count ?? "Not provided",
-});
+    name: data.guest_name ?? "Unknown guest",
+    email: data.guest_email ?? data.contact ?? "No email provided",
+    check_in: data.start_date,
+    check_out: data.end_date,
+    guests: data.guests_count ?? "Not provided",
+  });
 
   return NextResponse.json({ booking: data });
 }
@@ -164,7 +180,6 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "id is required" }, { status: 400 });
   }
 
-  // Get existing booking first so we know if status changed
   const { data: existingBooking, error: existingError } = await supabase
     .from("bookings")
     .select("*")
@@ -178,7 +193,7 @@ export async function PATCH(req: Request) {
   const patch: Record<string, any> = {
     start_date: body.start_date,
     end_date: body.end_date,
-    status: body.status,
+    status: body.status === undefined ? undefined : normalizeStatus(body.status),
     guest_name: body.guest_name,
     guest_email: body.guest_email,
     phone: body.phone,
@@ -206,26 +221,24 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const oldStatus = existingBooking?.status;
-const newStatus = data?.status;
+  const oldStatus = normalizeStatus(existingBooking?.status);
+  const newStatus = normalizeStatus(data?.status);
 
-// When owner moves request to provisional, send bank/payment details
-if (
-  oldStatus !== "provisional" &&
-  newStatus === "provisional" &&
-  data?.guest_email
-) {
-  await sendGuestPaymentDetails(data);
-}
+  if (
+    oldStatus !== "provisional" &&
+    newStatus === "provisional" &&
+    data?.guest_email
+  ) {
+    await sendGuestPaymentDetails(data);
+  }
 
-// When owner confirms payment received, send booking confirmation
-if (
-  oldStatus !== "booked" &&
-  newStatus === "booked" &&
-  data?.guest_email
-) {
-  await sendGuestBookingConfirmed(data);
-}
+  if (
+    oldStatus !== "booked" &&
+    newStatus === "booked" &&
+    data?.guest_email
+  ) {
+    await sendGuestBookingConfirmed(data);
+  }
 
   return NextResponse.json({ booking: data });
 }
