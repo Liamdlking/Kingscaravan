@@ -206,17 +206,26 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Send guest approval email only when moving to confirmed
   const oldStatus = existingBooking?.status;
-  const newStatus = data?.status;
+const newStatus = data?.status;
 
-  if (
-    oldStatus !== "confirmed" &&
-    newStatus === "confirmed" &&
-    data?.guest_email
-  ) {
-    await sendGuestApproval(data);
-  }
+// When owner moves request to provisional, send bank/payment details
+if (
+  oldStatus !== "provisional" &&
+  newStatus === "provisional" &&
+  data?.guest_email
+) {
+  await sendGuestPaymentDetails(data);
+}
+
+// When owner confirms payment received, send booking confirmation
+if (
+  oldStatus !== "booked" &&
+  newStatus === "booked" &&
+  data?.guest_email
+) {
+  await sendGuestBookingConfirmed(data);
+}
 
   return NextResponse.json({ booking: data });
 }
