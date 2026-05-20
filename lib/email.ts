@@ -116,3 +116,30 @@ export async function sendGuestBookingConfirmed(booking: any) {
     console.error("Guest confirmation email failed:", error);
   }
 }
+export async function sendCustomGuestEmail({
+  to,
+  subject,
+  message,
+}: {
+  to: string;
+  subject: string;
+  message: string;
+}) {
+  if (!to || !subject || !message) return;
+
+  try {
+    await resend.emails.send({
+      from: process.env.RESEND_FROM!,
+      to,
+      subject,
+      html: `
+        <div style="font-family: Arial, sans-serif; line-height: 1.5;">
+          ${message.replace(/\n/g, "<br />")}
+          <p>Many thanks,<br />Kings Caravan</p>
+        </div>
+      `,
+    });
+  } catch (error) {
+    console.error("Custom guest email failed:", error);
+  }
+}
