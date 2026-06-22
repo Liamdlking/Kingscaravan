@@ -74,10 +74,10 @@ function isAllowedPattern(startISO: string, endISO: string) {
   const startDay = start.getDay();
   const endDay = end.getDay();
 
-  if (startDay === 5 && endDay === 1) return { ok: true, reason: "" };
-  if (startDay === 1 && endDay === 5) return { ok: true, reason: "" };
-  if (startDay === 6 && endDay === 6) return { ok: true, reason: "" };
-
+  if (startDay === 5 && endDay === 1) return { ok: true, reason: "" }; // Fri–Mon
+if (startDay === 1 && endDay === 5) return { ok: true, reason: "" }; // Mon–Fri
+if (startDay === 6 && endDay === 6) return { ok: true, reason: "" }; // Sat–Sat
+if (startDay === 5 && endDay === 5) return { ok: true, reason: "" }; // Fri–Fri
   return { ok: false, reason: "Allowed stays are Fri–Mon, Mon–Fri, Fri-Fri, or Sat–Sat." };
 }
 
