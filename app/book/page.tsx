@@ -7,6 +7,22 @@ function getQS(name: string) {
   return new URLSearchParams(window.location.search).get(name) || "";
 }
 
+function getDayNumber(date: string) {
+  return new Date(`${date}T00:00:00`).getDay();
+}
+
+function isAllowedStay(startDate: string, endDate: string) {
+  const startDay = getDayNumber(startDate);
+  const endDay = getDayNumber(endDate);
+
+  return (
+    (startDay === 5 && endDay === 1) || // Friday to Monday
+    (startDay === 1 && endDay === 5) || // Monday to Friday
+    (startDay === 6 && endDay === 6) || // Saturday to Saturday
+    (startDay === 5 && endDay === 5)    // Friday to Friday
+  );
+}
+
 export default function BookPage() {
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState<string>("");
@@ -109,6 +125,7 @@ By submitting this request, you confirm you have read and agree to these Terms &
   function onTermsScroll() {
     const el = termsBoxRef.current;
     if (!el) return;
+
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 6) {
       setTermsUnlocked(true);
     }
@@ -118,6 +135,28 @@ By submitting this request, you confirm you have read and agree to these Terms &
     e.preventDefault();
     const form = e.currentTarget;
     setMsg("");
+
+    const f = new FormData(form);
+
+    const startDate = String(f.get("start_date") || "");
+    const endDate = String(f.get("end_date") || "");
+
+    if (!startDate || !endDate) {
+      setMsg("Please choose an arrival and departure date.");
+      return;
+    }
+
+    if (endDate <= startDate) {
+      setMsg("Departure date must be after arrival date.");
+      return;
+    }
+
+    if (!isAllowedStay(startDate, endDate)) {
+      setMsg(
+        "Please choose one of our available stay patterns: Friday to Monday, Monday to Friday, Saturday to Saturday, or Friday to Friday."
+      );
+      return;
+    }
 
     if (!termsUnlocked) {
       setMsg("Please scroll to the bottom of the Terms & Conditions to enable acceptance.");
@@ -131,15 +170,14 @@ By submitting this request, you confirm you have read and agree to these Terms &
 
     setSending(true);
 
-    const f = new FormData(form);
     const dogsYes = String(f.get("dogs") || "no") === "yes";
     const dogsCount = dogsYes ? Number(f.get("dogs_count") || 1) || 1 : 0;
 
     const payload = {
       status: "requested",
 
-      start_date: String(f.get("start_date") || ""),
-      end_date: String(f.get("end_date") || ""),
+      start_date: startDate,
+      end_date: endDate,
 
       guest_name: String(f.get("guest_name") || ""),
       guest_email: String(f.get("guest_email") || ""),
@@ -211,7 +249,9 @@ By submitting this request, you confirm you have read and agree to these Terms &
               <label style={styles.field}>
                 <span style={styles.label}>Departure date</span>
                 <input name="end_date" type="date" required defaultValue={endPrefill || undefined} style={styles.input} />
-                <small style={styles.small}>Checkout day is not booked. Same-day turnover is allowed.</small>
+                <small style={styles.small}>
+                  Available stays: Fri–Mon, Mon–Fri, Sat–Sat, or Fri–Fri.
+                </small>
               </label>
             </div>
           </section>
