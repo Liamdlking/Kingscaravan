@@ -78,7 +78,7 @@ function isAllowedPattern(startISO: string, endISO: string) {
   if (startDay === 1 && endDay === 5) return { ok: true, reason: "" };
   if (startDay === 6 && endDay === 6) return { ok: true, reason: "" };
 
-  return { ok: false, reason: "Allowed stays are Fri–Mon, Mon–Fri, or Sat–Sat." };
+  return { ok: false, reason: "Allowed stays are Fri–Mon, Mon–Fri, Fri-Fri, or Sat–Sat." };
 }
 
 function calcPrice(startISO: string, endISO: string, rates: Rate[]) {
